@@ -14,8 +14,8 @@ pub const NodeState = enum(u8) {
     STORED = 1,
 };
 
-pub // TODO: Better memory alignment
-const StoreNode = struct {
+// TODO: Better memory alignment
+pub const StoreNode = struct {
     value: *const anyopaque,
     expires: u62,
     state: NodeState,
@@ -32,9 +32,13 @@ pub const Store = struct {
     //       empty list1 and fill list2 with nodes from list1
     //       make list2 into list1
     list: []StoreNode,
+    secondaryList: ?[]StoreNode,
+    count: u64 = 0,
     fba: std.heap.FixedBufferAllocator,
     raw_buffer: []u8,
 
+    // TODO: change to min_size: usize to initialize an empty store, grow as needed
+    // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
         const raw_buffer = try allocator.alloc(u8, size);
 
@@ -78,6 +82,7 @@ pub const Store = struct {
         while (true) {
             if (current_node.state == NodeState.EMPTY) {
                 self.list[idx] = new_node;
+                self.count += 1;
                 return;
             }
 
@@ -85,6 +90,7 @@ pub const Store = struct {
                 const temp_node = current_node.*;
                 current_node.* = new_node;
                 new_node = temp_node;
+                self.count += 1;
             }
 
             new_node.psl += 1;
@@ -96,5 +102,17 @@ pub const Store = struct {
                 return;
             }
         }
+    }
+
+    pub fn remove(self: *Store, key: []const u8) !void {
+        // TODO: The actual impl, lol
+        self.count -= 1;
+        return;
+    }
+
+    pub fn resize() !void {
+        // TODO: Resize to twice the size with a new list
+        //       if count of list1 is 0 then
+        return;
     }
 };

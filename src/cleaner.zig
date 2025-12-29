@@ -1,15 +1,18 @@
-const store = @import("store.zig");
+const s = @import("store.zig");
 
 const CacheCleaner = struct {
-    head: ?*store.StoreNode,
-    tail: ?*store.StoreNode,
+    head: ?*s.StoreNode,
+    tail: ?*s.StoreNode,
     size: usize = 0,
+    store: *s.Store,
 
-    pub fn init() !CacheCleaner {
-        return CacheCleaner{};
+    pub fn init(store: *s.Store) !CacheCleaner {
+        return CacheCleaner{
+            .store = store,
+        };
     }
 
-    pub fn add(self: *CacheCleaner, node: *store.StoreNode) !void {
+    pub fn add(self: *CacheCleaner, node: *s.StoreNode) !void {
         if (self.head == null) {
             node.next = null;
             node.prev = null;
@@ -60,5 +63,13 @@ const CacheCleaner = struct {
 
             curr_opt = curr.next;
         }
+    }
+
+    pub fn remove(node: *s.StoreNode) !void {
+        return;
+    }
+
+    pub fn scan(self: *CacheCleaner) !void {
+        return;
     }
 };
