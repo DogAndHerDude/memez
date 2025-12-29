@@ -1,12 +1,12 @@
 const std = @import("std");
 const hasher = @import("hasher.zig");
 
-const NO_EXPIRY: u64 = 0;
+pub const NO_EXPIRY: u64 = 0;
 
-const TypeTag = union(enum) {
-    boolean: bool, // 1 byte
-    integer: u64, // 8 bytes
-    string: []const u8, // 16 bytes (ptr + len)
+pub const TypeTag = enum {
+    integer,
+    string,
+    bool,
 };
 
 const NodeState = enum(u8) {
@@ -83,7 +83,13 @@ const Store = struct {
             }
 
             new_node.psl += 1;
-            idx = (index + 1) % self.list.len;
+            idx = (idx + 1) % self.list.len;
+
+            if (idx >= self.list.len) {
+                // Ain't no more space, get lost, buddy
+                // Probably return some error something wack
+                return;
+            }
         }
     }
 };
