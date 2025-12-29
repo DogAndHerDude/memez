@@ -72,12 +72,37 @@ pub const Store = struct {
         const node = self.list[idx];
 
         if (node.state != NodeState.OCCUPIED) {
-            // TODO: Return error
+            // TODO: Return error not found
             return;
         }
 
-        // TODO: Check psl by hash and key
+        if (std.mem.eql(u8, key, node.key)) {
+            return node;
+        }
 
+        var n_i_psl = idx + 1;
+
+        if (n_i_psl >= self.len) {
+            // Errors galore
+            return;
+        }
+
+        while (n_i_psl < self.len) {
+            const n_node = self.list[idx + 1];
+
+            if (n_node.psl == 0) {
+                // No matching hash keys, not found err
+                return;
+            }
+
+            if (std.mem.eql(u8, key, n_node.key)) {
+                return n_node;
+            }
+
+            n_i_psl += 1;
+        }
+
+        // Ain't found nothing, toss an error back
         return;
     }
 
