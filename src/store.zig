@@ -115,11 +115,15 @@ pub const Store = struct {
 
         var n_i_psl = idx + 1;
 
-        while (self.list[n_i_psl].psl > 0) |p_node| {
-            p_node.psl -= 1;
-            self.list[n_i_psl - 1].* = p_node;
+        while (n_i_psl < self.list.len) {
+            if (self.list[n_i_psl].psl > 0) |p_node| {
+                p_node.psl -= 1;
+                self.list[n_i_psl - 1].* = p_node;
 
-            n_i_psl += 1;
+                n_i_psl += 1;
+            }
+
+            return;
         }
 
         self.count -= 1;
