@@ -107,13 +107,20 @@ pub const Store = struct {
 
     pub fn remove(self: *Store, key: []const u8) !void {
         const hash = try hasher.hashKey(key);
-        var idx = hash % self.list.len;
+        const idx = hash % self.list.len;
 
         const node = self.list[idx];
 
         node.state = NodeState.DELETED;
 
-        // TODO: Move neighbors by -1
+        var n_i_psl = idx + 1;
+
+        while (self.list[n_i_psl].psl > 0) |p_node| {
+            p_node.psl -= 1;
+            self.list[n_i_psl - 1].* = p_node;
+
+            n_i_psl += 1;
+        }
 
         self.count -= 1;
         return;
