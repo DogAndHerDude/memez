@@ -12,6 +12,7 @@ pub const TypeTag = enum {
 pub const NodeState = enum(u8) {
     EMPTY = 0,
     STORED = 1,
+    DELETED = 2,
 };
 
 // TODO: Better memory alignment
@@ -105,7 +106,15 @@ pub const Store = struct {
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
-        // TODO: The actual impl, lol
+        const hash = try hasher.hashKey(key);
+        var idx = hash % self.list.len;
+
+        const node = self.list[idx];
+
+        node.state = NodeState.DELETED;
+
+        // TODO: Move neighbors by -1
+
         self.count -= 1;
         return;
     }

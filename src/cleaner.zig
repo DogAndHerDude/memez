@@ -1,6 +1,7 @@
+const std = @import("std");
 const s = @import("store.zig");
 
-const CacheCleaner = struct {
+pub const CacheCleaner = struct {
     head: ?*s.StoreNode,
     tail: ?*s.StoreNode,
     size: usize = 0,
@@ -65,11 +66,46 @@ const CacheCleaner = struct {
         }
     }
 
-    pub fn remove(node: *s.StoreNode) !void {
+    pub fn remove(self: *CacheCleaner, node: *s.StoreNode) !void {
+        if (node.prev) {
+            node.prev.?.next = node.next;
+        }
+
+        if (node.next) {
+            node.next.?.prev = node.prev;
+        }
+
+        try self.store.remove(node.key);
+
         return;
     }
 
+    // All quickest to expire items are place at the tail of the LL
+    // so just scan it recursively
     pub fn scan(self: *CacheCleaner) !void {
+        if (self.tail == null) {
+            return;
+        }
+
+        return self.rScan(self.tail);
+    }
+
+    fn rScan(self: *CacheCleaner, node: s.StoreNode) !void {
+        const i_now = std.time.timestamp();
+        const now = @as(u64, i_now);
+
+        if (node.expires > 0 and node.expires <= now) {
+            self.remove(node);
+
+            if (node.prev != null) {
+                return self.rScan(node.prev);
+            }
+
+            return;
+        }
+
+        // Previous nodes won't be expired either, just quit this bs before it eats up your CPU cycles.
+        // delicious, delicious CPU cycles...
         return;
     }
 };
