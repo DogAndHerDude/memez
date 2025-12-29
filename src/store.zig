@@ -33,7 +33,6 @@ pub const Store = struct {
     //       empty list1 and fill list2 with nodes from list1
     //       make list2 into list1
     list: []StoreNode,
-    secondaryList: ?[]StoreNode,
     count: u64 = 0,
     fba: std.heap.FixedBufferAllocator,
     raw_buffer: []u8,
@@ -77,6 +76,7 @@ pub const Store = struct {
         }
 
         if (std.mem.eql(u8, key, node.key)) {
+            // TODO: Check expiry and remove if needed
             return node;
         }
 
@@ -96,6 +96,7 @@ pub const Store = struct {
             }
 
             if (std.mem.eql(u8, key, n_node.key)) {
+                // TODO: Check expiry and remove if needed
                 return n_node;
             }
 
@@ -166,7 +167,7 @@ pub const Store = struct {
 
         while (n_i_psl < self.list.len) {
             if (self.list[n_i_psl].psl > 0) {
-                const p_node = self.list[n_i_psl].*;
+                const p_node = self.list[n_i_psl];
                 p_node.psl -= 1;
                 self.list[n_i_psl - 1].* = p_node;
                 // Resets, however, not sure if this works the way I imagined
