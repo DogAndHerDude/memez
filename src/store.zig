@@ -16,7 +16,7 @@ const NodeState = enum(u8) {
 
 // TODO: Better memory alignment
 const StoreNode = struct {
-    value: *anyopaque,
+    value: *const anyopaque,
     expires: u62,
     state: NodeState,
     key: []const u8,
@@ -24,12 +24,16 @@ const StoreNode = struct {
     psl: u64,
 };
 
-const Store = struct {
+pub const Store = struct {
+    // TODO: assign not the max size and init a second list when the first list grows to 75% of its size
+    //       create list2 double the size of list1 but within size limits
+    //       empty list1 and fill list2 with nodes from list1
+    //       make list2 into list1
     list: []StoreNode,
     fba: std.heap.FixedBufferAllocator,
     raw_buffer: []u8,
 
-    pub fn init(allocator: std.Mem.Allocator, size: usize) !Store {
+    pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
         const raw_buffer = try allocator.alloc(u8, size);
 
         var fba = std.heap.FixedBufferAllocator.init(raw_buffer);
@@ -45,18 +49,17 @@ const Store = struct {
 
         return Store{
             .list = list,
-            .capacity = max_items,
             .fba = fba,
             .raw_buffer = raw_buffer,
         };
     }
 
-    pub fn deinit(self: *Store, parent_allocator: std.Mem.Allocator) !void {
+    pub fn deinit(self: *Store, parent_allocator: std.mem.Allocator) void {
         parent_allocator.free(self.raw_buffer);
     }
 
-    pub fn put(self: *Store, key: []const u8, value: *anyopaque, tag: TypeTag, expires: u64) !void {
-        const new_node = StoreNode{
+    pub fn put(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) !void {
+        var new_node = StoreNode{
             .state = NodeState.STORED,
             .key = key,
             .value = value,

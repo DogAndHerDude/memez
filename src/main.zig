@@ -6,12 +6,17 @@ pub fn main() !void {
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 
-    const store = try s.Store.init(std.heap.page_allocator, size_bytes);
-    defer store.deinit(&store, std.heap.page_allocator);
+    var store = try s.Store.init(std.heap.page_allocator, size_bytes);
+    defer store.deinit(std.heap.page_allocator);
 
     const key = "my.key";
     const value = "my value";
 
-    store.put(&store, key, value, store.TypeTag.string, store.NO_EXPIRY);
-    //try memez.bufferedPrint(hash);
+    // TODO: Take result and create a double linked list with tail being the quikest to expire items
+    //       Scan and stop when expiry is > now
+    //       Do it in its own thread
+    try store.put(key, value, s.TypeTag.string, s.NO_EXPIRY);
+
+    // Pass store instance to a TCP server
+    // Multiplex that bad boy
 }
