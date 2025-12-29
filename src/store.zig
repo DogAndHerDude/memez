@@ -9,17 +9,23 @@ const TypeTag = union(enum) {
     string: []const u8, // 16 bytes (ptr + len)
 };
 
+const NodeState = enum(u8) {
+    EMPTY = 0,
+    STORED = 1,
+};
+
+// TODO: Better memory alignment
 const StoreNode = struct {
-    key: []const u8,
     value: *anyopaque,
+    expires: u62,
+    state: NodeState,
+    key: []const u8,
     tag: TypeTag,
-    expires: u64,
     psl: u64,
 };
 
 const Store = struct {
     list: []StoreNode,
-    capacity: usize,
     fba: std.heap.FixedBufferAllocator,
     raw_buffer: []u8,
 
@@ -32,6 +38,10 @@ const Store = struct {
         const max_items = size / @sizeOf(StoreNode);
 
         const list = try fba_allocator.alloc(StoreNode, max_items);
+
+        for (list) |*node| {
+            node.state = NodeState.EMPTY;
+        }
 
         return Store{
             .list = list,
@@ -47,17 +57,33 @@ const Store = struct {
 
     pub fn put(self: *Store, key: []const u8, value: *anyopaque, tag: TypeTag, expires: u64) !void {
         const new_node = StoreNode{
+            .state = NodeState.STORED,
             .key = key,
             .value = value,
             .tag = tag,
             .expires = expires,
-            .psl = 0, // TODO: update the psl logic
-        }
+            .psl = 0,
+        };
 
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.capacity;
+        var idx = hash % self.list.len;
+
         const current_node = &self.list[idx];
 
-        while (true) {}
+        while (true) {
+            if (current_node.state == NodeState.EMPTY) {
+                self.list[idx] = new_node;
+                return;
+            }
+
+            if (new_node.psl > current_node.psl) {
+                const temp_node = current_node.*;
+                current_node.* = new_node;
+                new_node = temp_node;
+            }
+
+            new_node.psl += 1;
+            idx = (index + 1) % self.list.len;
+        }
     }
 };
