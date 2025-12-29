@@ -165,9 +165,20 @@ pub const Store = struct {
         var n_i_psl = idx + 1;
 
         while (n_i_psl < self.list.len) {
-            if (self.list[n_i_psl].psl > 0) |p_node| {
+            if (self.list[n_i_psl].psl > 0) {
+                const p_node = self.list[n_i_psl].*;
                 p_node.psl -= 1;
                 self.list[n_i_psl - 1].* = p_node;
+                // Resets, however, not sure if this works the way I imagined
+                // does p_node get modified too or p_node gets brought into the stack as a new value?
+                self.list[n_i_psl].key = "";
+                self.list[n_i_psl].value = null;
+                self.list[n_i_psl].psl = 0;
+                self.list[n_i_psl].expires = 0;
+                self.list[n_i_psl].state = NodeState.EMPTY;
+                // *next & *prev are supposed to be cleaned up in the cleaner
+                // so if that ain't done, tough shit, your LL state is fucked
+                // Tag??????
 
                 n_i_psl += 1;
             }
