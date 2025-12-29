@@ -1,6 +1,8 @@
 const std = @import("std");
 const s = @import("store.zig");
 
+// Not currently used until I change the allocator used for the store
+
 pub const CacheCleaner = struct {
     head: ?*s.StoreNode,
     tail: ?*s.StoreNode,

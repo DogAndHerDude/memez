@@ -11,7 +11,7 @@ pub const TypeTag = enum {
 
 pub const NodeState = enum(u8) {
     EMPTY = 0,
-    STORED = 1,
+    OCCUPIED = 1,
     DELETED = 2,
 };
 
@@ -65,13 +65,32 @@ pub const Store = struct {
         parent_allocator.free(self.raw_buffer);
     }
 
+    pub fn get(self: *Store, key: []const u8) !StoreNode {
+        const hash = try hasher.hashKey(key);
+        const idx = hash % self.list.len;
+
+        const node = self.list[idx];
+
+        if (node.state != NodeState.OCCUPIED) {
+            // TODO: Return error
+            return;
+        }
+
+        // TODO: Check psl by hash and key
+
+        return;
+    }
+
     pub fn put(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) !void {
+        const i_now = std.time.timestamp();
+        const now = @as(u62, i_now);
+        const expires_at = now + expires;
         var new_node = StoreNode{
-            .state = NodeState.STORED,
+            .state = NodeState.OCCUPIED,
             .key = key,
             .value = value,
             .tag = tag,
-            .expires = expires,
+            .expires = expires_at,
             .psl = 0,
         };
 
@@ -81,7 +100,7 @@ pub const Store = struct {
         const current_node = &self.list[idx];
 
         while (true) {
-            if (current_node.state == NodeState.EMPTY) {
+            if (current_node.state == NodeState.EMPTY or current_node.state == NodeState.DELETED) {
                 self.list[idx] = new_node;
                 self.count += 1;
                 return;
@@ -111,7 +130,12 @@ pub const Store = struct {
 
         const node = self.list[idx];
 
+        if (node.state != NodeState.OCCUPIED) {
+            return;
+        }
+
         node.state = NodeState.DELETED;
+        self.count -= 1;
 
         var n_i_psl = idx + 1;
 
@@ -126,7 +150,6 @@ pub const Store = struct {
             return;
         }
 
-        self.count -= 1;
         return;
     }
 
