@@ -9,12 +9,12 @@ pub const TypeTag = enum {
     bool,
 };
 
-const NodeState = enum(u8) {
+pub const NodeState = enum(u8) {
     EMPTY = 0,
     STORED = 1,
 };
 
-// TODO: Better memory alignment
+pub // TODO: Better memory alignment
 const StoreNode = struct {
     value: *const anyopaque,
     expires: u62,
@@ -22,6 +22,8 @@ const StoreNode = struct {
     key: []const u8,
     tag: TypeTag,
     psl: u64,
+    next: ?*StoreNode,
+    prev: ?*StoreNode,
 };
 
 pub const Store = struct {
