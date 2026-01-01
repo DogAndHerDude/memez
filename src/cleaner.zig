@@ -69,6 +69,7 @@ pub const CacheCleaner = struct {
     }
 
     pub fn remove(self: *CacheCleaner, node: *s.StoreNode) !void {
+        // TODO: Save node copy in case removal errors
         if (node.prev) {
             node.prev.?.next = node.next;
         }
@@ -78,6 +79,8 @@ pub const CacheCleaner = struct {
         }
 
         try self.store.remove(node.key);
+
+        self.size -= 1;
 
         return;
     }
