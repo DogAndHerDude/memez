@@ -143,7 +143,6 @@ pub const Store = struct {
                 const temp_node = current_node.*;
                 current_node.* = new_node;
                 new_node = temp_node;
-                self.count += 1;
             }
 
             new_node.psl += 1;
