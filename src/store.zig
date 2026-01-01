@@ -107,7 +107,7 @@ pub const Store = struct {
         return;
     }
 
-    pub fn put(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) !void {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) !void {
         const i_now = std.time.timestamp();
         const now = @as(u62, i_now);
         const expires_at = now + expires;
@@ -132,6 +132,13 @@ pub const Store = struct {
                 return;
             }
 
+            // Overwrite existing matching value
+            if (current_node.state == NodeState.OCCUPIED and std.mem.eql(new_node.key, current_node.key)) {
+                self.list[idx] = new_node;
+                return;
+            }
+
+            // Shift them around, shake 'em up
             if (new_node.psl > current_node.psl) {
                 const temp_node = current_node.*;
                 current_node.* = new_node;
