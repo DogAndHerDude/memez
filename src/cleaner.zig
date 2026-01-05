@@ -69,18 +69,24 @@ pub const CacheCleaner = struct {
     }
 
     pub fn remove(self: *CacheCleaner, node: *s.StoreNode) !void {
-        // TODO: Save node copy in case removal errors
-        if (node.prev) {
-            node.prev.?.next = node.next;
+        if (node == self.head) {
+            self.head = node.next;
+        }
+        if (node == self.tail) {
+            self.tail = node.prev;
         }
 
-        if (node.next) {
-            node.next.?.prev = node.prev;
+        if (node.prev) |prev| {
+            prev.?.next = node.next;
+        }
+
+        if (node.next) |next| {
+            next.prev = node.prev;
         }
 
         try self.store.remove(node.key);
 
-        self.size -= 1;
+        if (self.size > 0) self.size -= 1;
 
         return;
     }
@@ -88,29 +94,21 @@ pub const CacheCleaner = struct {
     // All quickest to expire items are place at the tail of the LL
     // so just scan it recursively
     pub fn scan(self: *CacheCleaner) !void {
-        if (self.tail == null) {
-            return;
+        var current_node = self.tail;
+        const now = @as(u64, @intCast(std.time.timestamp()));
+
+        while (current_node) |node| {
+            if (node.expires > 0) {
+                return;
+            }
+
+            const next_curr = node.prev;
+
+            try self.remove(node);
+
+            current_node = next_curr;
         }
 
         return self.rScan(self.tail);
-    }
-
-    fn rScan(self: *CacheCleaner, node: s.StoreNode) !void {
-        const i_now = std.time.timestamp();
-        const now = @as(u64, i_now);
-
-        if (node.expires > 0 and node.expires <= now) {
-            self.remove(node);
-
-            if (node.prev != null) {
-                return self.rScan(node.prev);
-            }
-
-            return;
-        }
-
-        // Previous nodes won't be expired either, just quit this bs before it eats up your CPU cycles.
-        // delicious, delicious CPU cycles...
-        return;
     }
 };
