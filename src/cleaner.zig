@@ -98,7 +98,7 @@ pub const CacheCleaner = struct {
         const now = @as(u64, @intCast(std.time.timestamp()));
 
         while (current_node) |node| {
-            if (node.expires > 0) {
+            if (node.expires > now) {
                 return;
             }
 
@@ -108,7 +108,5 @@ pub const CacheCleaner = struct {
 
             current_node = next_curr;
         }
-
-        return self.rScan(self.tail);
     }
 };
