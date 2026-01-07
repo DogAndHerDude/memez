@@ -10,9 +10,9 @@ pub const TypeTag = enum {
 };
 
 pub const NodeState = enum(u8) {
-    EMPTY = 0,
-    OCCUPIED = 1,
-    DELETED = 2,
+    empty = 0,
+    occupied = 1,
+    deleted = 2,
 };
 
 // TODO: Better memory alignment
@@ -59,7 +59,7 @@ pub const Store = struct {
         const list = try fba_allocator.alloc(StoreNode, max_items);
 
         for (list) |*node| {
-            node.state = NodeState.EMPTY;
+            node.state = .empty;
         }
 
         return Store{
@@ -80,7 +80,7 @@ pub const Store = struct {
 
         const node = self.p_table[idx];
 
-        if (node.state != NodeState.OCCUPIED) {
+        if (node.state != .occupied) {
             // TODO: Return error not found
             return;
         }
@@ -122,7 +122,7 @@ pub const Store = struct {
         const now = @as(u62, i_now);
         const expires_at = now + expires;
         var new_node = StoreNode{
-            .state = NodeState.OCCUPIED,
+            .state = .occupied,
             .key = key,
             .value = value,
             .tag = tag,
@@ -136,16 +136,16 @@ pub const Store = struct {
         const current_node = &self.p_table[idx];
 
         while (true) {
-            if (current_node.state == NodeState.EMPTY or current_node.state == NodeState.DELETED) {
+            if (current_node.state == .empty or current_node.state == .deleted) {
                 self.p_table[idx] = new_node;
                 self.p_size += 1;
                 return;
             }
 
-            if (current_node.state == NodeState.DELETED and self.p_deleted > 0) self.p_deleted -= 1;
+            if (current_node.state == .deleted and self.p_deleted > 0) self.p_deleted -= 1;
 
             // Overwrite existing matching value
-            if (current_node.state == NodeState.OCCUPIED and std.mem.eql(new_node.key, current_node.key)) {
+            if (current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
                 self.p_table[idx] = new_node;
                 return;
             }
@@ -174,11 +174,11 @@ pub const Store = struct {
 
         const node = self.p_table[idx];
 
-        if (node.state != NodeState.OCCUPIED) {
+        if (node.state != .occupied) {
             return;
         }
 
-        node.state = NodeState.DELETED;
+        node.state = .deleted;
         if (self.p_size > 0) self.p_size -= 1;
         self.p_deleted += 1;
 
@@ -198,7 +198,7 @@ pub const Store = struct {
                     p_node.value = null;
                     p_node.psl = 0;
                     p_node.expires = 0;
-                    p_node.state = NodeState.EMPTY;
+                    p_node.state = .empty;
                     p_node.tag = null;
                     // *next & *prev are supposed to be cleaned up in the cleaner
                     // so if that ain't done, tough shit, your LL state is fucked
