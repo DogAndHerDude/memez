@@ -6,7 +6,8 @@ pub const NO_EXPIRY: u64 = 0;
 pub const TypeTag = enum {
     integer,
     string,
-    bool,
+    list,
+    vector,
 };
 
 pub const NodeState = enum {
