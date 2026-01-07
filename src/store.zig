@@ -142,6 +142,8 @@ pub const Store = struct {
                 return;
             }
 
+            if (current_node.state == NodeState.DELETED and self.p_deleted > 0) self.p_deleted -= 1;
+
             // Overwrite existing matching value
             if (current_node.state == NodeState.OCCUPIED and std.mem.eql(new_node.key, current_node.key)) {
                 self.p_table[idx] = new_node;
@@ -179,6 +181,8 @@ pub const Store = struct {
         node.state = NodeState.DELETED;
         if (self.p_size > 0) self.p_size -= 1;
         self.p_deleted += 1;
+
+        // TODO: if p_deleted + p_migrated == p_capacity we can then free and realloc the list
 
         var n_i_psl = idx + 1;
 
