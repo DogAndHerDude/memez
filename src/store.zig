@@ -9,10 +9,10 @@ pub const TypeTag = enum {
     bool,
 };
 
-pub const NodeState = enum(u8) {
-    empty = 0,
-    occupied = 1,
-    deleted = 2,
+pub const NodeState = enum {
+    empty,
+    occupied,
+    deleted,
 };
 
 // TODO: Better memory alignment
