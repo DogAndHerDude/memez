@@ -3,19 +3,19 @@ const s = @import("store.zig");
 
 // Not currently used until I change the allocator used for the store
 
-pub const CacheCleaner = struct {
+pub const CacheProbe = struct {
     head: ?*s.StoreNode,
     tail: ?*s.StoreNode,
     size: usize = 0,
     store: *s.Store,
 
-    pub fn init(store: *s.Store) !CacheCleaner {
-        return CacheCleaner{
+    pub fn init(store: *s.Store) !CacheProbe {
+        return CacheProbe{
             .store = store,
         };
     }
 
-    pub fn add(self: *CacheCleaner, node: *s.StoreNode) !void {
+    pub fn add(self: *CacheProbe, node: *s.StoreNode) !void {
         if (self.head == null) {
             node.next = null;
             node.prev = null;
@@ -68,7 +68,7 @@ pub const CacheCleaner = struct {
         }
     }
 
-    pub fn remove(self: *CacheCleaner, node: *s.StoreNode) !void {
+    pub fn remove(self: *CacheProbe, node: *s.StoreNode) !void {
         if (node == self.head) {
             self.head = node.next;
         }
@@ -93,7 +93,7 @@ pub const CacheCleaner = struct {
 
     // All quickest to expire items are place at the tail of the LL
     // so just scan it recursively
-    pub fn scan(self: *CacheCleaner) !void {
+    pub fn scan(self: *CacheProbe) !void {
         var current_node = self.tail;
         const now = @as(u64, @intCast(std.time.timestamp()));
 

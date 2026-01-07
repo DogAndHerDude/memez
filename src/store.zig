@@ -28,18 +28,27 @@ pub const StoreNode = struct {
 };
 
 pub const Store = struct {
-    // TODO: assign not the max size and init a second list when the first list grows to 75% of its size
-    //       create list2 double the size of list1 but within size limits
-    //       empty list1 and fill list2 with nodes from list1
-    //       make list2 into list1
-    list: []StoreNode,
-    count: u64 = 0,
+    // Primary table
+    p_table: []StoreNode,
+    p_size: usize = 0,
+    p_capacity: usize,
+    p_migrated: usize = 0,
+    p_deleted: usize = 0,
+
+    // Secondary table
+    s_table: []StoreNode,
+    s_size: usize = 0,
+    s_capacity: usize,
+    s_migrated: usize,
+    s_deleted: usize,
+
     fba: std.heap.FixedBufferAllocator,
     raw_buffer: []u8,
 
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
+        // TODO: Change to DPA
         const raw_buffer = try allocator.alloc(u8, size);
 
         var fba = std.heap.FixedBufferAllocator.init(raw_buffer);
@@ -54,7 +63,8 @@ pub const Store = struct {
         }
 
         return Store{
-            .list = list,
+            .p_table = list,
+            .p_capacity = max_items,
             .fba = fba,
             .raw_buffer = raw_buffer,
         };
@@ -66,9 +76,9 @@ pub const Store = struct {
 
     pub fn get(self: *Store, key: []const u8) !StoreNode {
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.list.len;
+        const idx = hash % self.p_table.len;
 
-        const node = self.list[idx];
+        const node = self.p_table[idx];
 
         if (node.state != NodeState.OCCUPIED) {
             // TODO: Return error not found
@@ -88,7 +98,7 @@ pub const Store = struct {
         }
 
         while (n_i_psl < self.len) {
-            const n_node = self.list[idx + 1];
+            const n_node = self.p_table[idx + 1];
 
             if (n_node.psl == 0) {
                 // No matching hash keys, not found err
@@ -121,20 +131,20 @@ pub const Store = struct {
         };
 
         const hash = try hasher.hashKey(key);
-        var idx = hash % self.list.len;
+        var idx = hash % self.p_table.len;
 
-        const current_node = &self.list[idx];
+        const current_node = &self.p_table[idx];
 
         while (true) {
             if (current_node.state == NodeState.EMPTY or current_node.state == NodeState.DELETED) {
-                self.list[idx] = new_node;
-                self.count += 1;
+                self.p_table[idx] = new_node;
+                self.p_size += 1;
                 return;
             }
 
             // Overwrite existing matching value
             if (current_node.state == NodeState.OCCUPIED and std.mem.eql(new_node.key, current_node.key)) {
-                self.list[idx] = new_node;
+                self.p_table[idx] = new_node;
                 return;
             }
 
@@ -146,9 +156,9 @@ pub const Store = struct {
             }
 
             new_node.psl += 1;
-            idx = (idx + 1) % self.list.len;
+            idx = (idx + 1) % self.p_table.len;
 
-            if (idx >= self.list.len) {
+            if (idx >= self.p_table.len) {
                 // Ain't no more space, get lost, buddy
                 // Probably return some error something wack
                 return;
@@ -158,27 +168,28 @@ pub const Store = struct {
 
     pub fn remove(self: *Store, key: []const u8) !void {
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.list.len;
+        const idx = hash % self.p_table.len;
 
-        const node = self.list[idx];
+        const node = self.p_table[idx];
 
         if (node.state != NodeState.OCCUPIED) {
             return;
         }
 
         node.state = NodeState.DELETED;
-        self.count -= 1;
+        if (self.p_size > 0) self.p_size -= 1;
+        self.p_deleted += 1;
 
         var n_i_psl = idx + 1;
 
-        while (n_i_psl <= self.list.len) {
-            if (self.list[n_i_psl].psl > 0) {
-                const p_node = &self.list[n_i_psl];
+        while (n_i_psl <= self.p_table.len) {
+            if (self.p_table[n_i_psl].psl > 0) {
+                const p_node = &self.p_table[n_i_psl];
                 const temp_node = p_node.*;
                 temp_node.psl -= 1;
-                self.list[n_i_psl - 1].* = temp_node;
+                self.p_table[n_i_psl - 1].* = temp_node;
 
-                if (n_i_psl + 1 < self.list.len and self.list[n_i_psl + 1].psl == 0) {
+                if (n_i_psl + 1 < self.p_table.len and self.p_table[n_i_psl + 1].psl == 0) {
                     p_node.key = "";
                     p_node.value = null;
                     p_node.psl = 0;

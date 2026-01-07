@@ -1,7 +1,7 @@
 const std = @import("std");
 const memez = @import("memez");
 const s = @import("store.zig");
-const c = @import("cleaner.zig");
+const p = @import("probe.zig");
 
 pub fn main() !void {
     // TODO: read config.toml file
