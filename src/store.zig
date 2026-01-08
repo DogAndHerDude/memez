@@ -19,11 +19,11 @@ pub const NodeState = enum {
 // TODO: Better memory alignment
 pub const StoreNode = struct {
     value: *const anyopaque,
-    expires: u62,
-    state: NodeState,
+    expires: u62 = 0,
+    state: NodeState = .empty,
     key: []const u8,
     tag: ?TypeTag,
-    psl: u64,
+    psl: u64 = 0,
     next: ?*StoreNode,
     prev: ?*StoreNode,
 };
@@ -43,8 +43,10 @@ pub const Store = struct {
     s_migrated: usize,
     s_deleted: usize,
 
-    fba: std.heap.FixedBufferAllocator,
+    gpa: std.heap.GeneralPurposeAllocator,
     raw_buffer: []u8,
+
+    mu: std.Thread.Mutex = std.Thread.Mutex{},
 
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
@@ -62,6 +64,10 @@ pub const Store = struct {
         for (list) |*node| {
             node.state = .empty;
         }
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{});
+        const alloc = gpa.allocator();
+        const buf = try alloc.alloc(StoreNode, size);
 
         return Store{
             .p_table = list,

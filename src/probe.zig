@@ -94,6 +94,9 @@ pub const CacheProbe = struct {
     // All quickest to expire items are place at the tail of the LL
     // so just scan it recursively
     pub fn scan(self: *CacheProbe) !void {
+        self.store.mu.lock();
+        defer self.store.mu.unlock();
+
         var current_node = self.tail;
         const now = @as(u64, @intCast(std.time.timestamp()));
 
