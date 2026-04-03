@@ -43,37 +43,37 @@ pub const Store = struct {
     s_migrated: usize,
     s_deleted: usize,
 
-    gpa: std.heap.GeneralPurposeAllocator,
-    raw_buffer: []u8,
+    gpa: std.mem.Allocator,
+    //raw_buffer: []u8,
 
     mu: std.Thread.Mutex = std.Thread.Mutex{},
 
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
-        // TODO: Change to DPA
-        const raw_buffer = try allocator.alloc(u8, size);
-
-        var fba = std.heap.FixedBufferAllocator.init(raw_buffer);
-        const fba_allocator = fba.allocator();
-
         const max_items = size / @sizeOf(StoreNode);
+        const buf = try allocator.alloc(StoreNode, size);
 
-        const list = try fba_allocator.alloc(StoreNode, max_items);
+        // TODO: Change to DPA
+        //const raw_buffer = try allocator.alloc(u8, size);
 
-        for (list) |*node| {
-            node.state = .empty;
-        }
+        //var fba = std.heap.FixedBufferAllocator.init(raw_buffer);
+        //const fba_allocator = fba.allocator();
 
-        var gpa = std.heap.GeneralPurposeAllocator(.{});
-        const alloc = gpa.allocator();
-        const buf = try alloc.alloc(StoreNode, size);
+        //const list = try fba_allocator.alloc(StoreNode, max_items);
+
+        //for (list) |*node| {
+        //    node.state = .empty;
+        //}
+
+        //var gpa = std.heap.GeneralPurposeAllocator(.{});
+        //const alloc = gpa.allocator();
+        //const buf = try alloc.alloc(StoreNode, size);
 
         return Store{
-            .p_table = list,
+            .p_table = buf,
             .p_capacity = max_items,
-            .fba = fba,
-            .raw_buffer = raw_buffer,
+            .gpa = allocator,
         };
     }
 
@@ -140,16 +140,17 @@ pub const Store = struct {
         const hash = try hasher.hashKey(key);
         var idx = hash % self.p_table.len;
 
-        const current_node = &self.p_table[idx];
-
         while (true) {
+            const current_node = &self.p_table[idx];
+
             if (current_node.state == .empty or current_node.state == .deleted) {
                 self.p_table[idx] = new_node;
                 self.p_size += 1;
+
+                if (current_node.state == .deleted and self.p_deleted > 0) self.p_deleted -= 1;
+
                 return;
             }
-
-            if (current_node.state == .deleted and self.p_deleted > 0) self.p_deleted -= 1;
 
             // Overwrite existing matching value
             if (current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
@@ -166,12 +167,6 @@ pub const Store = struct {
 
             new_node.psl += 1;
             idx = (idx + 1) % self.p_table.len;
-
-            if (idx >= self.p_table.len) {
-                // Ain't no more space, get lost, buddy
-                // Probably return some error something wack
-                return;
-            }
         }
     }
 

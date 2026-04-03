@@ -10,7 +10,9 @@ pub fn main() !void {
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 
-    var store = try s.Store.init(std.heap.page_allocator, size_bytes);
+    const allocator = std.heap.GeneralPurposeAllocator(.{});
+
+    var store = try s.Store.init(allocator.allocator(), size_bytes);
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);
