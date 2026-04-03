@@ -36,7 +36,18 @@ pub const StoreNode = struct {
     prev: ?*StoreNode,
 };
 
+const ActiveTable = enum {
+    primary,
+    secondary,
+};
+
 pub const Store = struct {
+    const UPSIZE_THRESHOLD: usize = 75;
+    const DOWNSIZE_THRESHOLD: usize = 50;
+
+    const UPSIZE_FACTOR: usize = 2;
+    const DOWNSIZE_FACTOR: usize = 2;
+
     // Primary table
     p_table: []StoreNode,
     p_size: usize = 0,
@@ -45,11 +56,13 @@ pub const Store = struct {
     p_deleted: usize = 0,
 
     // Secondary table
-    s_table: []StoreNode,
+    s_table: ?[]StoreNode,
     s_size: usize = 0,
-    s_capacity: usize,
-    s_migrated: usize,
-    s_deleted: usize,
+    s_capacity: usize = 0,
+    s_migrated: usize = 0,
+    s_deleted: usize = 0,
+
+    active_table: ActiveTable,
 
     gpa: std.mem.Allocator,
 
