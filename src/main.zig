@@ -15,6 +15,9 @@ pub fn main() !void {
     var probe = try p.CacheProbe.init();
     var store = try s.Store.init(allocator.allocator(), size_bytes);
 
+    defer probe.deinit();
+    defer store.deinit(allocator);
+
     store.on_remove = probe.onRemove;
     store.on_remove_ctx = &probe;
 
@@ -23,8 +26,6 @@ pub fn main() !void {
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);
-
-    defer store.deinit(allocator);
 
     // TODO: spawn std.Thread.spawn
     //       run cleanup every second, if more than 25% of items cleaned up run again

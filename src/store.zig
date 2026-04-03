@@ -87,10 +87,13 @@ pub const Store = struct {
 
     pub fn deinit(self: *Store) void {
         self.gpa.free(self.p_table);
-        self.gpa.free(self.s_table);
+
+        if (self.s_table) |table| {
+            self.gpa.free(table);
+        }
     }
 
-    pub fn get(self: *Store, key: []const u8) !StoreNode {
+    pub fn get(self: *Store, key: []const u8) StoreError!StoreNode {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.p_table.len;
 
@@ -108,17 +111,17 @@ pub const Store = struct {
 
         var n_i_psl = idx + 1;
 
-        if (n_i_psl >= self.len) {
+        if (n_i_psl >= self.p_table.len) {
             // Errors galore
             return;
         }
 
-        while (n_i_psl < self.len) {
+        while (n_i_psl < self.p_table.len) {
             const n_node = self.p_table[idx + 1];
 
             if (n_node.psl == 0) {
                 // No matching hash keys, not found err
-                return;
+                return StoreError.KeyNotFound;
             }
 
             if (std.mem.eql(u8, key, n_node.key)) {
@@ -182,6 +185,9 @@ pub const Store = struct {
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
+        self.mu.lock();
+        defer self.mu.unlock();
+
         const hash = try hasher.hashKey(key);
         const idx = hash % self.p_table.len;
 
