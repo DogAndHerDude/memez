@@ -1,7 +1,17 @@
 const std = @import("std");
 const s = @import("store.zig");
 
-// TODO: Create a separate ExpiryNode that contains StoreNode as to not have 16 byes of data on the StoreNode
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// !!!!!!!!!!!!!!! NOTE !!!!!!!!!!!!!!!
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// Switch to using the passed hash table for the future
+// Less overhead checking for order
+// I can utilize lazy expiry easier
+// I can run a 100ms scan and pick x random items
+// I can scan again if I deleted 25% of them
+// If not, just go back to sleep
+// Goodnight
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 const ProbeNode = struct {
     store_node: *s.StoreNode,
