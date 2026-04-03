@@ -2,6 +2,7 @@ const std = @import("std");
 const memez = @import("memez");
 const s = @import("store.zig");
 const p = @import("probe.zig");
+const scanner = @import("scanner.zig");
 
 pub fn main() !void {
     // TODO: read config.toml file
@@ -23,6 +24,9 @@ pub fn main() !void {
 
     probe.on_remove = store.onRemove;
     probe.on_remove_ctx = &store;
+
+    scanner.spawn(&probe)
+
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);
