@@ -101,7 +101,7 @@ pub const CacheProbe = struct {
         defer self.store.mu.unlock();
 
         var current_node = self.tail;
-        const now = @as(u64, @intCast(std.time.timestamp()));
+        const now: u64 = @intCast(std.time.timestamp());
 
         while (current_node) |node| {
             if (node.expires > now) {

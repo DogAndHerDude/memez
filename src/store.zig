@@ -116,9 +116,9 @@ pub const Store = struct {
         return;
     }
 
-    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) StoreError!void {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u64) StoreError!void {
         const i_now = std.time.timestamp();
-        const now = @as(u62, i_now);
+        const now: u64 = @intCast(i_now);
         const expires_at = now + expires;
         var new_node = StoreNode{
             .state = .occupied,
