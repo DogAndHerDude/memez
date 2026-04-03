@@ -10,14 +10,14 @@ pub fn main() !void {
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 
-    const allocator = std.heap.GeneralPurposeAllocator(.{});
+    var allocator = std.heap.GeneralPurposeAllocator(.{});
 
     var store = try s.Store.init(allocator.allocator(), size_bytes);
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);
 
-    defer store.deinit(std.heap.page_allocator);
+    defer store.deinit(allocator);
 
     // TODO: spawn std.Thread.spawn
     //       run cleanup every second, if more than 25% of items cleaned up run again

@@ -30,6 +30,7 @@ pub const StoreNode = struct {
     key: []const u8,
     tag: ?TypeTag,
     psl: u64 = 0,
+    // TODO: Move these assholes into a separate list for the probe as to not store 8 or 4 damn bytes
     next: ?*StoreNode,
     prev: ?*StoreNode,
 };
@@ -50,7 +51,6 @@ pub const Store = struct {
     s_deleted: usize,
 
     gpa: std.mem.Allocator,
-    //raw_buffer: []u8,
 
     mu: std.Thread.Mutex = std.Thread.Mutex{},
 
@@ -58,23 +58,7 @@ pub const Store = struct {
     // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
         const max_items = size / @sizeOf(StoreNode);
-        const buf = try allocator.alloc(StoreNode, size);
-
-        // TODO: Change to DPA
-        //const raw_buffer = try allocator.alloc(u8, size);
-
-        //var fba = std.heap.FixedBufferAllocator.init(raw_buffer);
-        //const fba_allocator = fba.allocator();
-
-        //const list = try fba_allocator.alloc(StoreNode, max_items);
-
-        //for (list) |*node| {
-        //    node.state = .empty;
-        //}
-
-        //var gpa = std.heap.GeneralPurposeAllocator(.{});
-        //const alloc = gpa.allocator();
-        //const buf = try alloc.alloc(StoreNode, size);
+        const buf = try allocator.alloc(StoreNode, max_items);
 
         return Store{
             .p_table = buf,
@@ -83,8 +67,9 @@ pub const Store = struct {
         };
     }
 
-    pub fn deinit(self: *Store, parent_allocator: std.mem.Allocator) void {
-        parent_allocator.free(self.raw_buffer);
+    pub fn deinit(self: *Store) void {
+        self.gpa.free(self.p_table);
+        self.gpa.free(self.s_table);
     }
 
     pub fn get(self: *Store, key: []const u8) !StoreNode {
