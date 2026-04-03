@@ -12,7 +12,14 @@ pub fn main() !void {
 
     var allocator = std.heap.GeneralPurposeAllocator(.{});
 
+    var probe = try p.CacheProbe.init();
     var store = try s.Store.init(allocator.allocator(), size_bytes);
+
+    store.on_remove = probe.onRemove;
+    store.on_remove_ctx = &probe;
+
+    probe.on_remove = store.onRemove;
+    probe.on_remove_ctx = &store;
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);

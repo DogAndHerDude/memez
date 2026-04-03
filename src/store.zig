@@ -68,6 +68,10 @@ pub const Store = struct {
 
     mu: std.Thread.Mutex = std.Thread.Mutex{},
 
+    // Callbacks for the probe
+    on_remove: ?*const fn (*anyopaque, *StoreNode) void = null,
+    on_remove_ctx: ?*anyopaque = null,
+
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
@@ -209,8 +213,10 @@ pub const Store = struct {
                     p_node.expires = 0;
                     p_node.state = .empty;
                     p_node.tag = null;
-                    // *next & *prev are supposed to be cleaned up in the cleaner
-                    // so if that ain't done, tough shit, your LL state is fucked
+
+                    if (self.on_remove) |cb| {
+                        cb(self.on_remove_ctx.?, p_node);
+                    }
                 }
 
                 n_i_psl += 1;
@@ -222,6 +228,12 @@ pub const Store = struct {
         }
 
         return;
+    }
+
+    pub fn onRemove(ctx: *anyopaque, node: *StoreNode) !void {
+        const self: *Store = @ptrCast(@alignCast(ctx));
+
+        try self.remove(node);
     }
 
     pub fn resize() !void {

@@ -11,10 +11,12 @@ pub const CacheProbe = struct {
     size: usize = 0,
     store: *s.Store,
 
-    pub fn init(store: *s.Store) !CacheProbe {
-        return CacheProbe{
-            .store = store,
-        };
+    // Callabacks for the store
+    on_remove: ?*const fn (*anyopaque, *s.StoreNode) void = null,
+    on_remove_ctx: ?anyopaque = null,
+
+    pub fn init() !CacheProbe {
+        return CacheProbe{};
     }
 
     pub fn add(self: *CacheProbe, node: *s.StoreNode) !void {
@@ -86,19 +88,28 @@ pub const CacheProbe = struct {
             next.prev = node.prev;
         }
 
-        // TODO: Do not pass store, receive a callback when remove happened that the store removed a node and clean up the linked list
-        try self.store.remove(node.key);
-
         if (self.size > 0) self.size -= 1;
 
+        if (self.on_remove) |cb| {
+            cb(self.on_remove_ctx.?, node);
+        }
+
         return;
+    }
+
+    // Callbacks for external structs
+    pub fn onRemove(ctx: *anyopaque, node: *s.StoreNode) !void {
+        const self: *CacheProbe = @ptrCast(@alignCast(ctx));
+
+        try self.remove(node);
     }
 
     // All quickest to expire items are place at the tail of the LL
     // so just scan it recursively
     pub fn scan(self: *CacheProbe) !void {
-        self.store.mu.lock();
-        defer self.store.mu.unlock();
+        // TODO: refactor locking
+        //self.store.mu.lock();
+        //defer self.store.mu.unlock();
 
         var current_node = self.tail;
         const now: u64 = @intCast(std.time.timestamp());
