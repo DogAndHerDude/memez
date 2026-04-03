@@ -10,6 +10,7 @@ pub const StoreError = error{
 };
 
 pub const TypeTag = enum {
+    none,
     integer,
     string,
     list,
@@ -24,12 +25,12 @@ pub const NodeState = enum {
 
 // TODO: Better memory alignment
 pub const StoreNode = struct {
+    key: []const u8,
     value: *const anyopaque,
     expires: u62 = 0,
-    state: NodeState = .empty,
-    key: []const u8,
-    tag: ?TypeTag,
     psl: u64 = 0,
+    tag: TypeTag = .none,
+    state: NodeState = .empty,
     // TODO: Move these assholes into a separate list for the probe as to not store 8 or 4 damn bytes
     next: ?*StoreNode,
     prev: ?*StoreNode,
