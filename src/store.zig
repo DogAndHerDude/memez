@@ -3,6 +3,12 @@ const hasher = @import("hasher.zig");
 
 pub const NO_EXPIRY: u64 = 0;
 
+pub const StoreError = error{
+    TableFull,
+    KeyNotFound,
+    OutOfMemory,
+};
+
 pub const TypeTag = enum {
     integer,
     string,
@@ -124,7 +130,7 @@ pub const Store = struct {
         return;
     }
 
-    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) !void {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u62) StoreError!void {
         const i_now = std.time.timestamp();
         const now = @as(u62, i_now);
         const expires_at = now + expires;
@@ -167,6 +173,8 @@ pub const Store = struct {
 
             new_node.psl += 1;
             idx = (idx + 1) % self.p_table.len;
+
+            if (idx == 0) return StoreError.TableFull;
         }
     }
 
