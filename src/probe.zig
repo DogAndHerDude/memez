@@ -128,25 +128,24 @@ pub const CacheProbe = struct {
         try self.remove(node);
     }
 
-    // All quickest to expire items are place at the tail of the LL
-    // so just scan it recursively
     pub fn scan(self: *CacheProbe) !void {
         self.mu.lock();
         defer self.mu.unlock();
 
-        var current_node = self.tail;
+        var current_node = self.head;
         const now: u64 = @intCast(std.time.timestamp());
 
         while (current_node) |node| {
-            if (node.expires > now) {
+            if (node.store_node.expires > now) {
+                // Everything after this is later, no point scanning further, save them CPU cycles, save the planet
                 return;
             }
 
-            const next_curr = node.prev;
+            const next = node.next;
 
-            try self.remove(node);
+            try self.remove(node.store_node);
 
-            current_node = next_curr;
+            current_node = next;
         }
     }
 };
