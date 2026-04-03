@@ -1,6 +1,8 @@
 const std = @import("std");
 const s = @import("store.zig");
 
+// TODO: Create a separate ExpiryNode that contains StoreNode as to not have 16 byes of data on the StoreNode
+
 // Not currently used until I change the allocator used for the store
 
 pub const CacheProbe = struct {
@@ -84,6 +86,7 @@ pub const CacheProbe = struct {
             next.prev = node.prev;
         }
 
+        // TODO: Do not pass store, receive a callback when remove happened that the store removed a node and clean up the linked list
         try self.store.remove(node.key);
 
         if (self.size > 0) self.size -= 1;
