@@ -25,8 +25,7 @@ pub fn main() !void {
     probe.on_remove = store.onRemove;
     probe.on_remove_ctx = &store;
 
-    scanner.spawn(&probe)
-
+    scanner.spawn(&probe);
 
     // use the cleaner on a seperate thread
     // var cleaner = try c.CacheCleaner.init(&store);

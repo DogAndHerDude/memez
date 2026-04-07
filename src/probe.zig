@@ -40,8 +40,17 @@ pub const CacheProbe = struct {
         };
     }
 
-    pub fn deinit() !void {
-        // TODO: free memory for the expiry nodes
+    pub fn deinit(self: *CacheProbe) !void {
+        var probe_node = self.head;
+
+        self.mu.lock();
+        defer self.mu.unlock();
+
+        while (probe_node) |current| {
+            probe_node = current.next;
+
+            self.gpa.destroy(current);
+        }
     }
 
     pub fn add(self: *CacheProbe, node: *s.StoreNode) !void {
