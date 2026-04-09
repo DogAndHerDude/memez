@@ -5,6 +5,7 @@ pub const NO_EXPIRY: u64 = 0;
 
 pub const StoreError = error{
     TableFull,
+    TableNotInitialized,
     KeyNotFound,
     OutOfMemory,
 };
@@ -39,27 +40,29 @@ const ActiveTable = enum {
 };
 
 pub const Store = struct {
-    const UPSIZE_THRESHOLD: usize = 75;
-    const DOWNSIZE_THRESHOLD: usize = 50;
+    const UPSIZE_THRESHOLD: f16 = 0.75;
+    const DOWNSIZE_THRESHOLD: f16 = 0.50;
 
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
+    min_size: usize,
+
     // Primary table
-    p_table: []StoreNode,
-    p_size: usize = 0,
+    p_table: ?[]StoreNode,
+    p_occupied: usize = 0,
     p_capacity: usize,
     p_migrated: usize = 0,
     p_deleted: usize = 0,
 
     // Secondary table
     s_table: ?[]StoreNode,
-    s_size: usize = 0,
+    s_occupied: usize = 0,
     s_capacity: usize = 0,
     s_migrated: usize = 0,
     s_deleted: usize = 0,
 
-    active_table: ActiveTable,
+    active_table: ActiveTable = .primary,
 
     gpa: std.mem.Allocator,
 
@@ -76,6 +79,7 @@ pub const Store = struct {
         const buf = try allocator.alloc(StoreNode, max_items);
 
         return Store{
+            .min_size = max_items,
             .p_table = buf,
             .p_capacity = max_items,
             .gpa = allocator,
@@ -90,6 +94,9 @@ pub const Store = struct {
         }
     }
 
+    // TODO: Have private functions to get from primary & get from secondary
+    //       if both return and both tables are not undefined, determine which needs to be migrated over to current active table
+    //       otherwise return value
     pub fn get(self: *Store, key: []const u8) StoreError!StoreNode {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.p_table.len;
@@ -161,7 +168,7 @@ pub const Store = struct {
 
             if (current_node.state == .empty or current_node.state == .deleted) {
                 self.p_table[idx] = new_node;
-                self.p_size += 1;
+                self.p_occupied += 1;
 
                 if (current_node.state == .deleted and self.p_deleted > 0) self.p_deleted -= 1;
 
@@ -202,7 +209,7 @@ pub const Store = struct {
         }
 
         node.state = .deleted;
-        if (self.p_size > 0) self.p_size -= 1;
+        if (self.p_occupied > 0) self.p_occupied -= 1;
         self.p_deleted += 1;
 
         // TODO: if p_deleted + p_migrated == p_capacity we can then free and realloc the list
@@ -237,7 +244,76 @@ pub const Store = struct {
         try self.remove(node);
     }
 
-    pub fn resize() !void {
+    fn getCurrentActiveTable(self: *Store) ![]StoreNode {
+        switch (self.active_table) {
+            .primary => {
+                if (self.p_table) |t| {
+                    return t;
+                }
+
+                return StoreError.TableNotInitialized;
+            },
+            .secondary => {
+                if (self.s_table) |t| {
+                    return t;
+                }
+
+                return StoreError.TableNotInitialized;
+            },
+        }
+    }
+
+    fn checkTableAndResize(self: *Store) !void {
+        switch (self.active_table) {
+            .primary => {
+                // Check if at capacity
+                //   if at capacity scale up
+                // Check if under capacity
+                //   if occupied < threshold factor & capacity not less than min_size
+
+                // General idea:
+                //
+                // Calculate the if thershold reached
+                // cast to floats
+                // basically calculate percentages
+
+                //if (self.p_capacity == self.p_occupied) {
+                //    try self.resizeUp();
+                //}
+
+                //
+                //if (self.p_occupied == (self.p_capacity / DOWNSIZE_FACTOR)) {
+                //    try self.resizeDown();
+                //}
+
+                self.active_table = .secondary;
+            },
+            .secondary => {
+                // Check if at capacity
+                //   if at capacity scale up
+                // Check if under capacity
+                //   if occupied < threshold factor & capacity not less than min_size
+
+                self.active_table = .primary;
+            },
+        }
+    }
+
+    fn resizeUp(self: *Store) !void {
+        self.mu.lock();
+        defer self.mu.unlock();
+
+        // TODO: p_table should be optional so as we could free memory when everything is migrated + deleted + empty == p_capacity
+
+        // TODO: Resize to twice the size with a new list
+        //       if count of list1 is 0 then
+        return;
+    }
+
+    fn resizeDown(self: *Store) !void {
+        self.mu.lock();
+        defer self.mu.unlock();
+
         // TODO: Resize to twice the size with a new list
         //       if count of list1 is 0 then
         return;
