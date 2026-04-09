@@ -123,18 +123,13 @@ pub const CacheProbe = struct {
 
                 if (self.size > 0) self.size -= 1;
 
-                if (self.on_remove) |cb| {
-                    cb(self.on_remove_ctx.?, node);
-                }
-
                 self.gpa.destroy(curr);
                 return;
             }
             curr_opt = curr.next;
         }
 
-        return;
-        //return error.NodeNotFound;
+        return error.NodeNotFound;
     }
 
     // Callbacks for external structs
@@ -163,6 +158,10 @@ pub const CacheProbe = struct {
             const next = node.next;
 
             try self.remove(node.store_node);
+
+            if (self.on_remove) |cb| {
+                cb(self.on_remove_ctx.?, node);
+            }
 
             current_node = next;
         }

@@ -31,9 +31,6 @@ pub const StoreNode = struct {
     psl: u64 = 0,
     tag: TypeTag = .none,
     state: NodeState = .empty,
-    // TODO: Move these assholes into a separate list for the probe as to not store 8 or 4 damn bytes
-    next: ?*StoreNode,
-    prev: ?*StoreNode,
 };
 
 const ActiveTable = enum {
@@ -96,44 +93,51 @@ pub const Store = struct {
     pub fn get(self: *Store, key: []const u8) StoreError!StoreNode {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.p_table.len;
+        const now: u64 = @intCast(std.time.timestamp());
 
         const node = self.p_table[idx];
 
         if (node.state != .occupied) {
-            // TODO: Return error not found
-            return;
+            return StoreError.KeyNotFound;
         }
 
         if (std.mem.eql(u8, key, node.key)) {
-            // TODO: Check expiry and remove if needed
+            if (node.expires <= now) {
+                self.removeAndBroadcast(node.key, node);
+
+                return StoreError.KeyNotFound;
+            }
+
             return node;
         }
 
         var n_i_psl = idx + 1;
 
         if (n_i_psl >= self.p_table.len) {
-            // Errors galore
-            return;
+            return StoreError.KeyNotFound;
         }
 
         while (n_i_psl < self.p_table.len) {
             const n_node = self.p_table[idx + 1];
 
             if (n_node.psl == 0) {
-                // No matching hash keys, not found err
                 return StoreError.KeyNotFound;
             }
 
             if (std.mem.eql(u8, key, n_node.key)) {
-                // TODO: Check expiry and remove if needed
+                if (node.expires <= now) {
+                    self.removeAndBroadcast(node.key, node);
+
+                    return StoreError.KeyNotFound;
+                }
+
                 return n_node;
             }
 
             n_i_psl += 1;
         }
 
-        // Ain't found nothing, toss an error back
-        return;
+        return StoreError.KeyNotFound;
     }
 
     pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u64) StoreError!void {
@@ -213,16 +217,7 @@ pub const Store = struct {
                 self.p_table[n_i_psl - 1].* = temp_node;
 
                 if (n_i_psl + 1 < self.p_table.len and self.p_table[n_i_psl + 1].psl == 0) {
-                    p_node.key = "";
-                    p_node.value = null;
-                    p_node.psl = 0;
-                    p_node.expires = 0;
-                    p_node.state = .empty;
-                    p_node.tag = null;
-
-                    if (self.on_remove) |cb| {
-                        cb(self.on_remove_ctx.?, p_node);
-                    }
+                    self.resetNode(p_node);
                 }
 
                 n_i_psl += 1;
@@ -246,5 +241,25 @@ pub const Store = struct {
         // TODO: Resize to twice the size with a new list
         //       if count of list1 is 0 then
         return;
+    }
+
+    fn removeAndBroadcast(self: *Store, key: []const u8, node: *StoreNode) !void {
+        if (self.on_remove) |cb| {
+            // Remove from the scanner probe first, since it's a double linked list, then remove it here
+            try cb(self.on_remove_ctx.?, node);
+        }
+
+        // The lookup is O(1) either way, didn't wanna reimplement the same remove function just by passing a node
+        // Plus you need to iterrate through the current hash table to change the psl either way
+        try self.remove(key);
+    }
+
+    fn resetNode(_: *Store, node: *StoreNode) void {
+        node.key = "";
+        node.value = null;
+        node.psl = 0;
+        node.expires = 0;
+        node.state = .empty;
+        node.tag = null;
     }
 };
