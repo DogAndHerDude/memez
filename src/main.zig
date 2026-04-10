@@ -1,7 +1,10 @@
 const std = @import("std");
 const xev = @import("xev");
-const memez = @import("memez");
 const manager = @import("manager.zig");
+
+const ev_vars = struct {
+    manager: *manager.Manager,
+};
 
 pub fn main() !void {
     // TODO: read config.toml file
@@ -21,15 +24,16 @@ pub fn main() !void {
     const w = try xev.Timer.init();
     defer w.deinit();
 
-    // 5s timer
     var c: xev.Completion = undefined;
-    w.run(&loop, &c, 5000, void, null, &timerCallback);
+    w.run(&loop, &c, 100, &ev_vars{
+        .manager = &mngr,
+    }, null, &timerCallback);
 
     try loop.run(.until_done);
 }
 
 fn timerCallback(
-    userdata: ?*void,
+    userdata: *ev_vars,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
