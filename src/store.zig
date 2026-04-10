@@ -48,24 +48,11 @@ pub const Store = struct {
 
     min_size: usize,
 
-    // Primary table
-    p_table: ?[]StoreNode,
-    p_occupied: usize = 0,
-    p_capacity: usize,
-    p_migrated: usize = 0,
-    p_deleted: usize = 0,
-
-    // Secondary table
-    // TODO: Move it to it's own store
-    //       Migrate between two different stores in a store manager
-    //       When migrating replace pointers in the CacheProbe
-    s_table: ?[]StoreNode,
-    s_occupied: usize = 0,
-    s_capacity: usize = 0,
-    s_migrated: usize = 0,
-    s_deleted: usize = 0,
-
-    active_table: ActiveTable = .primary,
+    table: ?[]StoreNode,
+    occupied: usize = 0,
+    capacity: usize,
+    migrated: usize = 0,
+    deleted: usize = 0,
 
     gpa: std.mem.Allocator,
 
@@ -83,14 +70,14 @@ pub const Store = struct {
 
         return Store{
             .min_size = max_items,
-            .p_table = buf,
-            .p_capacity = max_items,
+            .table = buf,
+            .capacity = max_items,
             .gpa = allocator,
         };
     }
 
     pub fn deinit(self: *Store) void {
-        self.gpa.free(self.p_table);
+        self.gpa.free(self.table);
 
         if (self.s_table) |table| {
             self.gpa.free(table);
@@ -102,10 +89,10 @@ pub const Store = struct {
     //       otherwise return value
     pub fn get(self: *Store, key: []const u8) StoreError!StoreNode {
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.p_table.len;
+        const idx = hash % self.table.len;
         const now: u64 = @intCast(std.time.timestamp());
 
-        const node = self.p_table[idx];
+        const node = self.table[idx];
 
         if (node.state != .occupied) {
             return StoreError.KeyNotFound;
@@ -123,12 +110,12 @@ pub const Store = struct {
 
         var n_i_psl = idx + 1;
 
-        if (n_i_psl >= self.p_table.len) {
+        if (n_i_psl >= self.table.len) {
             return StoreError.KeyNotFound;
         }
 
-        while (n_i_psl < self.p_table.len) {
-            const n_node = self.p_table[idx + 1];
+        while (n_i_psl < self.table.len) {
+            const n_node = self.table[idx + 1];
 
             if (n_node.psl == 0) {
                 return StoreError.KeyNotFound;
@@ -150,7 +137,7 @@ pub const Store = struct {
         return StoreError.KeyNotFound;
     }
 
-    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u64) StoreError!void {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u64) StoreError!*StoreNode {
         const i_now = std.time.timestamp();
         const now: u64 = @intCast(i_now);
         const expires_at = now + expires;
@@ -164,24 +151,25 @@ pub const Store = struct {
         };
 
         const hash = try hasher.hashKey(key);
-        var idx = hash % self.p_table.len;
+        var idx = hash % self.table.len;
 
         while (true) {
-            const current_node = &self.p_table[idx];
+            const current_node = &self.table[idx];
 
             if (current_node.state == .empty or current_node.state == .deleted) {
-                self.p_table[idx] = new_node;
-                self.p_occupied += 1;
+                self.table[idx] = new_node;
+                self.occupied += 1;
 
-                if (current_node.state == .deleted and self.p_deleted > 0) self.p_deleted -= 1;
+                if (current_node.state == .deleted and self.deleted > 0) self.deleted -= 1;
 
-                return;
+                return &new_node;
             }
 
             // Overwrite existing matching value
             if (current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
-                self.p_table[idx] = new_node;
-                return;
+                self.table[idx] = new_node;
+
+                return &new_node;
             }
 
             // Shift them around, shake 'em up
@@ -192,10 +180,12 @@ pub const Store = struct {
             }
 
             new_node.psl += 1;
-            idx = (idx + 1) % self.p_table.len;
+            idx = (idx + 1) % self.table.len;
 
             if (idx == 0) return StoreError.TableFull;
         }
+
+        // I'm sure something is not handled here potentially, but shouldn't happen really unless I loop forever more
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
@@ -203,30 +193,30 @@ pub const Store = struct {
         defer self.mu.unlock();
 
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.p_table.len;
+        const idx = hash % self.table.len;
 
-        const node = self.p_table[idx];
+        const node = self.table[idx];
 
         if (node.state != .occupied) {
             return;
         }
 
         node.state = .deleted;
-        if (self.p_occupied > 0) self.p_occupied -= 1;
-        self.p_deleted += 1;
+        if (self.occupied > 0) self.occupied -= 1;
+        self.deleted += 1;
 
         // TODO: if p_deleted + p_migrated == p_capacity we can then free and realloc the list
 
         var n_i_psl = idx + 1;
 
-        while (n_i_psl <= self.p_table.len) {
-            if (self.p_table[n_i_psl].psl > 0) {
-                const p_node = &self.p_table[n_i_psl];
+        while (n_i_psl <= self.table.len) {
+            if (self.table[n_i_psl].psl > 0) {
+                const p_node = &self.table[n_i_psl];
                 const temp_node = p_node.*;
                 temp_node.psl -= 1;
-                self.p_table[n_i_psl - 1].* = temp_node;
+                self.table[n_i_psl - 1].* = temp_node;
 
-                if (n_i_psl + 1 < self.p_table.len and self.p_table[n_i_psl + 1].psl == 0) {
+                if (n_i_psl + 1 < self.table.len and self.table[n_i_psl + 1].psl == 0) {
                     self.resetNode(p_node);
                 }
 
@@ -245,81 +235,6 @@ pub const Store = struct {
         const self: *Store = @ptrCast(@alignCast(ctx));
 
         try self.remove(node);
-    }
-
-    fn getCurrentActiveTable(self: *Store) ![]StoreNode {
-        switch (self.active_table) {
-            .primary => {
-                if (self.p_table) |t| {
-                    return t;
-                }
-
-                return StoreError.TableNotInitialized;
-            },
-            .secondary => {
-                if (self.s_table) |t| {
-                    return t;
-                }
-
-                return StoreError.TableNotInitialized;
-            },
-        }
-    }
-
-    fn checkTableAndResize(self: *Store) !void {
-        switch (self.active_table) {
-            .primary => {
-                // Check if at capacity
-                //   if at capacity scale up
-                // Check if under capacity
-                //   if occupied < threshold factor & capacity not less than min_size
-
-                // General idea:
-                //
-                // Calculate the if thershold reached
-                // cast to floats
-                // basically calculate percentages
-
-                //if (self.p_capacity == self.p_occupied) {
-                //    try self.resizeUp();
-                //}
-
-                //
-                //if (self.p_occupied == (self.p_capacity / DOWNSIZE_FACTOR)) {
-                //    try self.resizeDown();
-                //}
-
-                self.active_table = .secondary;
-            },
-            .secondary => {
-                // Check if at capacity
-                //   if at capacity scale up
-                // Check if under capacity
-                //   if occupied < threshold factor & capacity not less than min_size
-
-                self.active_table = .primary;
-            },
-        }
-    }
-
-    fn resizeUp(self: *Store) !void {
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        // TODO: p_table should be optional so as we could free memory when everything is migrated + deleted + empty == p_capacity
-
-        // TODO: Resize to twice the size with a new list
-        //       if count of list1 is 0 then
-        return;
-    }
-
-    fn resizeDown(self: *Store) !void {
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        // TODO: Resize to twice the size with a new list
-        //       if count of list1 is 0 then
-        return;
     }
 
     fn removeAndBroadcast(self: *Store, key: []const u8, node: *StoreNode) !void {
