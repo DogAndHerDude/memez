@@ -76,14 +76,15 @@ pub const Manager = struct {
     pub fn set(self: *Manager, key: []const u8, value: *anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !void {
         var store: ?m_store.Store = undefined;
 
-        if (try self.needsRehash()) {
-            self.rehash();
-        }
+        //const needs_rehash = try self.needsRehash()
+        //if () {
+        //    self.rehash();
+        //}
 
         store = try self.getActiveTable();
 
         if (store) |existing| {
-            const new_node = try existing.set(key, value, tag, expires);
+            const new_node = try existing.set(key, value, tag, opts);
 
             self.probe.add(new_node);
 
