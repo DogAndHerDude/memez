@@ -56,6 +56,9 @@ pub const Store = struct {
     p_deleted: usize = 0,
 
     // Secondary table
+    // TODO: Move it to it's own store
+    //       Migrate between two different stores in a store manager
+    //       When migrating replace pointers in the CacheProbe
     s_table: ?[]StoreNode,
     s_occupied: usize = 0,
     s_capacity: usize = 0,
