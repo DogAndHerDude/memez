@@ -140,16 +140,16 @@ pub const Store = struct {
         return StoreError.KeyNotFound;
     }
 
-    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, expires: u64) StoreError!*StoreNode {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, opts: SetOptions) StoreError!*StoreNode {
         const i_now = std.time.timestamp();
         const now: u64 = @intCast(i_now);
-        const expires_at = now + expires;
+        const expires_at = now + opts.ttl;
         var new_node = StoreNode{
             .state = .occupied,
             .key = key,
             .value = value,
             .tag = tag,
-            .expires = expires_at,
+            .expires = expires_at, // TODO: check remaining options for setting
             .psl = 0,
         };
 

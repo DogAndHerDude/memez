@@ -73,7 +73,7 @@ pub const Manager = struct {
     // - add expiry set command
     // - all that kinds of fancy stuff
     // - will probably refer to redis commands for implementation
-    pub fn set(self: *Manager, key: []const u8, value: *const anyopaque, tag: m_store.TypeTag, expires: u64) !void {
+    pub fn set(self: *Manager, key: []const u8, value: *anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !void {
         var store: ?m_store.Store = undefined;
 
         if (try self.needsRehash()) {
