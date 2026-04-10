@@ -1,6 +1,7 @@
 const std = @import("std");
 const m_store = @import("store.zig");
 const probe = @import("probe.zig");
+const scanner = @import("scanner.zig");
 
 const ActiveStore = enum {
     primary,
@@ -34,7 +35,21 @@ pub const Manager = struct {
         manager.probe.on_remove = manager.p_store.onRemove;
         manager.probe.on_remove_ctx = manager.p_store;
 
+        try scanner.spawn(&self.probe);
+
         return manager;
+    }
+
+    pub fn deinit(self: *Manager) !void {
+        if (self.p_store) |store| {
+            try store.deinit();
+        }
+
+        if (self.s_store) |store| {
+            try store.deinit();
+        }
+
+        try self.probe.deinit();
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {

@@ -1,8 +1,7 @@
 const std = @import("std");
+const xev = @import("xev");
 const memez = @import("memez");
-const s = @import("store.zig");
-const p = @import("probe.zig");
-const scanner = @import("scanner.zig");
+const manager = @import("manager.zig");
 
 pub fn main() !void {
     // TODO: read config.toml file
@@ -11,29 +10,33 @@ pub fn main() !void {
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 
-    var allocator = std.heap.GeneralPurposeAllocator(.{});
+    const allocator = std.heap.GeneralPurposeAllocator(.{});
+    const mngr = try manager.Manager.init(allocator, size_bytes);
 
-    var probe = try p.CacheProbe.init();
-    var store = try s.Store.init(allocator.allocator(), size_bytes);
+    defer mngr.deinit();
 
-    defer probe.deinit();
-    defer store.deinit(allocator);
+    var loop = try xev.Loop.init(.{});
+    defer loop.deinit();
 
-    store.on_remove = probe.onRemove;
-    store.on_remove_ctx = &probe;
+    const w = try xev.Timer.init();
+    defer w.deinit();
 
-    probe.on_remove = store.onRemove;
-    probe.on_remove_ctx = &store;
+    // 5s timer
+    var c: xev.Completion = undefined;
+    w.run(&loop, &c, 5000, void, null, &timerCallback);
 
-    scanner.spawn(&probe);
+    try loop.run(.until_done);
+}
 
-    // use the cleaner on a seperate thread
-    // var cleaner = try c.CacheCleaner.init(&store);
-
-    // TODO: spawn std.Thread.spawn
-    //       run cleanup every second, if more than 25% of items cleaned up run again
-    //       deal with locks and throw the whole project away because the main thread cannot access the data...
-
-    // Pass store instance to a TCP server
-    // Multiplex that bad boy
+fn timerCallback(
+    userdata: ?*void,
+    loop: *xev.Loop,
+    c: *xev.Completion,
+    result: xev.Timer.RunError!void,
+) xev.CallbackAction {
+    _ = userdata;
+    _ = loop;
+    _ = c;
+    _ = result catch unreachable;
+    return .disarm;
 }
