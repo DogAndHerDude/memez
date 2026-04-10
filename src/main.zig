@@ -13,11 +13,11 @@ pub fn main() !void {
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 
-    const allocator = std.heap.GeneralPurposeAllocator(.{});
-    const mngr = try manager.Manager.init(allocator, size_bytes);
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    const allocator = gpa.allocator();
+    var mngr = try manager.Manager.init(allocator, size_bytes);
 
     defer mngr.deinit();
-
     var loop = try xev.Loop.init(.{});
     defer loop.deinit();
 
@@ -25,20 +25,21 @@ pub fn main() !void {
     defer w.deinit();
 
     var c: xev.Completion = undefined;
-    w.run(&loop, &c, 100, &ev_vars{
+    const v = ev_vars{
         .manager = &mngr,
-    }, null, &timerCallback);
+    };
+    w.run(&loop, &c, 100, ev_vars, @constCast(&v), &timerCallback);
 
     try loop.run(.until_done);
 }
 
 fn timerCallback(
-    userdata: *ev_vars,
+    userdata: ?*ev_vars,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
 ) xev.CallbackAction {
-    _ = userdata;
+    _ = userdata.?;
     _ = loop;
     _ = c;
     _ = result catch unreachable;

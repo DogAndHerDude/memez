@@ -15,22 +15,22 @@ const s = @import("store.zig");
 
 const ProbeNode = struct {
     store_node: *s.StoreNode,
-    next: ?*s.StoreNode = null,
-    prev: ?*s.StoreNode = null,
+    next: ?*ProbeNode = null,
+    prev: ?*ProbeNode = null,
 };
 
 // Not currently used until I change the allocator used for the store
 
 pub const CacheProbe = struct {
-    head: ?*ProbeNode,
-    tail: ?*ProbeNode,
+    head: ?*ProbeNode = null,
+    tail: ?*ProbeNode = null,
     size: usize = 0,
 
     mu: std.Thread.Mutex = std.Thread.Mutex{},
 
     // Callabacks for the store
     on_remove: ?*const fn (*anyopaque, *s.StoreNode) void = null,
-    on_remove_ctx: ?anyopaque = null,
+    on_remove_ctx: ?*anyopaque = null,
 
     gpa: std.mem.Allocator,
 
@@ -40,7 +40,7 @@ pub const CacheProbe = struct {
         };
     }
 
-    pub fn deinit(self: *CacheProbe) !void {
+    pub fn deinit(self: *CacheProbe) void {
         var probe_node = self.head;
 
         self.mu.lock();
@@ -133,13 +133,15 @@ pub const CacheProbe = struct {
     }
 
     // Callbacks for external structs
-    pub fn onRemove(ctx: *anyopaque, node: *s.StoreNode) !void {
+    pub fn onRemove(ctx: *anyopaque, node: *s.StoreNode) void {
         const self: *CacheProbe = @ptrCast(@alignCast(ctx));
 
         self.mu.lock();
         defer self.mu.unlock();
 
-        try self.remove(node);
+        self.remove(node) catch |err| {
+            std.debug.print("onRemove error: {}\n", .{err});
+        };
     }
 
     pub fn scan(self: *CacheProbe) !void {
@@ -160,7 +162,7 @@ pub const CacheProbe = struct {
             try self.remove(node.store_node);
 
             if (self.on_remove) |cb| {
-                cb(self.on_remove_ctx.?, node);
+                cb(self.on_remove_ctx.?, node.store_node);
             }
 
             current_node = next;

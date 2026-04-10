@@ -48,7 +48,7 @@ pub const Store = struct {
 
     min_size: usize,
 
-    table: ?[]StoreNode,
+    table: []StoreNode,
     occupied: usize = 0,
     capacity: usize,
     migrated: usize = 0,
@@ -78,10 +78,6 @@ pub const Store = struct {
 
     pub fn deinit(self: *Store) void {
         self.gpa.free(self.table);
-
-        if (self.s_table) |table| {
-            self.gpa.free(table);
-        }
     }
 
     // TODO: Have private functions to get from primary & get from secondary
@@ -195,7 +191,7 @@ pub const Store = struct {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
 
-        const node = self.table[idx];
+        var node = self.table[idx];
 
         if (node.state != .occupied) {
             return;
@@ -212,9 +208,9 @@ pub const Store = struct {
         while (n_i_psl <= self.table.len) {
             if (self.table[n_i_psl].psl > 0) {
                 const p_node = &self.table[n_i_psl];
-                const temp_node = p_node.*;
+                var temp_node = p_node.*;
                 temp_node.psl -= 1;
-                self.table[n_i_psl - 1].* = temp_node;
+                self.table[n_i_psl - 1] = temp_node;
 
                 if (n_i_psl + 1 < self.table.len and self.table[n_i_psl + 1].psl == 0) {
                     self.resetNode(p_node);
@@ -231,10 +227,12 @@ pub const Store = struct {
         return;
     }
 
-    pub fn onRemove(ctx: *anyopaque, node: *StoreNode) !void {
+    pub fn onRemove(ctx: *anyopaque, node: *StoreNode) void {
         const self: *Store = @ptrCast(@alignCast(ctx));
 
-        try self.remove(node);
+        self.remove(node.key) catch |err| {
+            std.debug.print("STORE: onRemove error: {}\n", .{err});
+        };
     }
 
     fn removeAndBroadcast(self: *Store, key: []const u8, node: *StoreNode) !void {
@@ -250,10 +248,10 @@ pub const Store = struct {
 
     fn resetNode(_: *Store, node: *StoreNode) void {
         node.key = "";
-        node.value = null;
+        node.value = &null;
         node.psl = 0;
         node.expires = 0;
         node.state = .empty;
-        node.tag = null;
+        node.tag = .none;
     }
 };

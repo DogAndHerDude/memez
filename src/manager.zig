@@ -15,8 +15,8 @@ pub const Manager = struct {
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
-    p_store: ?m_store.Store,
-    s_store: ?m_store.Store,
+    p_store: ?m_store.Store = null,
+    s_store: ?m_store.Store = null,
 
     probe: probe.CacheProbe,
 
@@ -24,32 +24,34 @@ pub const Manager = struct {
 
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
         // TODO: define remove callback ctx & fn
-        const manager = Manager{
-            .p_store = m_store.Store.init(allocator, size),
-            .probe = probe.CacheProbe.init(allocator),
+        var manager = Manager{
+            .p_store = try m_store.Store.init(allocator, size),
+            .probe = try probe.CacheProbe.init(allocator),
         };
 
-        manager.p_store.on_remove = probe.onRemove;
-        manager.p_store.on_remove_ctx = manager.probe;
+        if (manager.p_store) |*store| {
+            store.on_remove = &probe.CacheProbe.onRemove;
+            store.on_remove_ctx = &manager.probe;
+        }
 
-        manager.probe.on_remove = manager.p_store.onRemove;
-        manager.probe.on_remove_ctx = manager.p_store;
+        manager.probe.on_remove = &m_store.Store.onRemove;
+        manager.probe.on_remove_ctx = &manager.p_store;
 
-        try scanner.spawn(&self.probe);
+        try scanner.spawn(&manager.probe);
 
         return manager;
     }
 
-    pub fn deinit(self: *Manager) !void {
-        if (self.p_store) |store| {
-            try store.deinit();
+    pub fn deinit(self: *Manager) void {
+        if (self.p_store) |*store| {
+            store.deinit();
         }
 
-        if (self.s_store) |store| {
-            try store.deinit();
+        if (self.s_store) |*store| {
+            store.deinit();
         }
 
-        try self.probe.deinit();
+        self.probe.deinit();
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
@@ -113,9 +115,9 @@ pub const Manager = struct {
         }
     }
 
-    fn needsRehash(self: *Manager) !bool {
+    fn needsRehash() !bool {
         return false;
     }
 
-    fn rehash(self: *Manager) !void {}
+    fn rehash() !void {}
 };
