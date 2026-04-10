@@ -1,5 +1,6 @@
 const std = @import("std");
 const m_store = @import("store.zig");
+const probe = @import("probe.zig");
 
 const ActiveStore = enum {
     primary,
@@ -16,11 +17,14 @@ pub const Manager = struct {
     p_store: ?m_store.Store,
     s_store: ?m_store.Store,
 
+    probe: probe.CacheProbe,
+
     active_store: ActiveStore = .primary,
 
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
         return Manager{
             .p_store = m_store.Store.init(allocator, size),
+            .probe = probe.CacheProbe.init(allocator),
         };
     }
 
@@ -32,12 +36,17 @@ pub const Manager = struct {
                 //      if true then check for key there
                 //      if found, migrate it to new table
                 //      then return pointer from the new table
+                //      swap the address in the probe
             }
         };
 
         return node;
     }
 
+    // More command types in the future, this is just a basic abstraction right now
+    // - add expiry set command
+    // - all that kinds of fancy stuff
+    // - will probably refer to redis commands for implementation
     pub fn set(self: *Manager, key: []const u8, value: *const anyopaque, tag: m_store.TypeTag, expires: u64) !void {
         var store: ?m_store.Store = undefined;
 
@@ -70,6 +79,7 @@ pub const Manager = struct {
                     return store;
                 }
 
+                // TODO: Errors
                 return;
             },
         }
