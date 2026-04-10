@@ -39,6 +39,13 @@ const ActiveTable = enum {
     secondary,
 };
 
+const SetOptions = struct {
+    ttl: u64 = 0, // 0 = no expiry
+    nx: bool = false, // only set if not exists
+    xx: bool = false, // only set if exists
+    get: bool = false, // return old value
+};
+
 pub const Store = struct {
     const UPSIZE_THRESHOLD: f16 = 0.75;
     const DOWNSIZE_THRESHOLD: f16 = 0.50;
