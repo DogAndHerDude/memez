@@ -22,10 +22,19 @@ pub const Manager = struct {
     active_store: ActiveStore = .primary,
 
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
-        return Manager{
+        // TODO: define remove callback ctx & fn
+        const manager = Manager{
             .p_store = m_store.Store.init(allocator, size),
             .probe = probe.CacheProbe.init(allocator),
         };
+
+        manager.p_store.on_remove = probe.onRemove;
+        manager.p_store.on_remove_ctx = manager.probe;
+
+        manager.probe.on_remove = manager.p_store.onRemove;
+        manager.probe.on_remove_ctx = manager.p_store;
+
+        return manager;
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
@@ -57,7 +66,11 @@ pub const Manager = struct {
         store = try self.getActiveTable();
 
         if (store) |existing| {
-            try existing.set(key, value, tag, expires);
+            const new_node = try existing.set(key, value, tag, expires);
+
+            self.probe.add(new_node);
+
+            return;
         }
 
         // TODO: error
