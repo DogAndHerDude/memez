@@ -95,11 +95,11 @@ pub const Manager = struct {
         return;
     }
 
-    fn getActiveTable(self: *Manager) !m_store.Store {
+    fn getActiveTable(self: *Manager) !*m_store.Store {
         switch (self.active_store) {
             .primary => {
                 if (self.p_store) |store| {
-                    return store;
+                    return &store;
                 }
 
                 // TODO: Errors
@@ -107,7 +107,7 @@ pub const Manager = struct {
             },
             .secondary => {
                 if (self.s_store) |store| {
-                    return store;
+                    return &store;
                 }
 
                 // TODO: Errors

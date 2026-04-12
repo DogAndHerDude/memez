@@ -90,7 +90,7 @@ pub const Store = struct {
     // TODO: Have private functions to get from primary & get from secondary
     //       if both return and both tables are not undefined, determine which needs to be migrated over to current active table
     //       otherwise return value
-    pub fn get(self: *Store, key: []const u8) StoreError!StoreNode {
+    pub fn get(self: *Store, key: []const u8) StoreError!*StoreNode {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
         const now: u64 = @intCast(std.time.timestamp());
@@ -108,7 +108,7 @@ pub const Store = struct {
                 return StoreError.KeyNotFound;
             }
 
-            return node;
+            return &node;
         }
 
         var n_i_psl = idx + 1;
@@ -131,7 +131,7 @@ pub const Store = struct {
                     return StoreError.KeyNotFound;
                 }
 
-                return n_node;
+                return &n_node;
             }
 
             n_i_psl += 1;
