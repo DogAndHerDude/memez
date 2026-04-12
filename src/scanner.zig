@@ -33,13 +33,6 @@ fn scanLoop(probe: *p.CacheProbe) !void {
     timer.run(&loop, &c, 100, p.CacheProbe, probe, onTick);
 
     try loop.run(.until_done);
-    // TODO: Prefer Event Loop
-    //       Implement it myself or just use available ones?
-    while (true) {
-        // TODO: Check how many items have been scanned
-        //       if x then scan again
-        std.Thread.sleep(std.time.ns_per_s / 10);
-    }
 }
 
 pub fn spawn(probe: *p.CacheProbe) !void {
