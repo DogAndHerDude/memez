@@ -63,6 +63,22 @@ pub const Manager = struct {
                 //      if found, migrate it to new table
                 //      then return pointer from the new table
                 //      swap the address in the probe
+
+                const i_table = self.getInactiveTable() catch |i_err| {
+                    std.debug.print("MANAGER: get error: {}\n", .{i_err});
+
+                    return m_store.StoreError.KeyNotFound;
+                };
+
+                // Better call migrate within the store and handle data there
+                // This is just a POC for myself
+                const node = try i_table.get(key);
+                const n_node = try a_table.set(key, node.value, node.tag);
+
+                n_node.ttl = node.ttl;
+                n_node.expires = node.expires;
+
+                return n_node;
             }
         };
 
@@ -107,6 +123,27 @@ pub const Manager = struct {
             },
             .secondary => {
                 if (self.s_store) |store| {
+                    return &store;
+                }
+
+                // TODO: Errors
+                return;
+            },
+        }
+    }
+
+    fn getInactiveTable(self: *Manager) !*m_store.Store {
+        switch (self.active_store) {
+            .primary => {
+                if (self.s_store) |store| {
+                    return &store;
+                }
+
+                // TODO: Errors
+                return;
+            },
+            .secondary => {
+                if (self.p_store) |store| {
                     return &store;
                 }
 

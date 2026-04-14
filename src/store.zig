@@ -28,6 +28,7 @@ pub const NodeState = enum {
 pub const StoreNode = struct {
     key: []const u8,
     value: *const anyopaque,
+    ttl: u64 = 0,
     expires: u64 = 0,
     psl: u64 = 0,
     tag: TypeTag = .none,
@@ -149,6 +150,7 @@ pub const Store = struct {
             .key = key,
             .value = value,
             .tag = tag,
+            .ttl = opts.ttl,
             .expires = expires_at, // TODO: check remaining options for setting
             .psl = 0,
         };
