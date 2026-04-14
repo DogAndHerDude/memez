@@ -190,6 +190,8 @@ pub const Manager = struct {
                 // TODO: Set new table to active position
                 //       Set old table to inactive
                 //       If old inactive table exists and is not empty then migrate remaining data? Drop it? What do?
+                //          - Generally I'll be running another thread for active rehash and granting 1ms of workload every 100ms to migrate or idx % 64 == 0
+                //          - This will allow to actively migrate and check for any rehash needs instead of lazy which can fill up the whole table and explode it
                 //       If old inactive table is empty just nuke it from orbit first and then spawn them
 
                 return;
