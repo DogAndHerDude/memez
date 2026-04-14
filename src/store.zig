@@ -54,12 +54,11 @@ pub const Store = struct {
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
-    min_size: usize,
+    min_capacity: usize,
 
     table: []StoreNode,
     occupied: usize = 0,
     capacity: usize,
-    migrated: usize = 0,
     deleted: usize = 0,
 
     gpa: std.mem.Allocator,
@@ -77,7 +76,7 @@ pub const Store = struct {
         const buf = try allocator.alloc(StoreNode, max_items);
 
         return Store{
-            .min_size = max_items,
+            .min_capacity = max_items,
             .table = buf,
             .capacity = max_items,
             .gpa = allocator,
@@ -222,7 +221,7 @@ pub const Store = struct {
                 self.table[n_i_psl - 1] = temp_node;
 
                 if (n_i_psl + 1 < self.table.len and self.table[n_i_psl + 1].psl == 0) {
-                    self.resetNode(p_node);
+                    resetNode(p_node);
                 }
 
                 n_i_psl += 1;
@@ -254,13 +253,13 @@ pub const Store = struct {
         // Plus you need to iterrate through the current hash table to change the psl either way
         try self.remove(key);
     }
-
-    fn resetNode(_: *Store, node: *StoreNode) void {
-        node.key = "";
-        node.value = &null;
-        node.psl = 0;
-        node.expires = 0;
-        node.state = .empty;
-        node.tag = .none;
-    }
 };
+
+pub fn resetNode(node: *StoreNode) void {
+    node.key = "";
+    node.value = &null;
+    node.psl = 0;
+    node.expires = 0;
+    node.state = .empty;
+    node.tag = .none;
+}

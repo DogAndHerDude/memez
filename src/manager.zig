@@ -8,6 +8,12 @@ const ActiveStore = enum {
     secondary,
 };
 
+const RehashDirection = enum {
+    up,
+    down,
+    none,
+};
+
 pub const Manager = struct {
     const UPSIZE_THRESHOLD: f16 = 0.75;
     const DOWNSIZE_THRESHOLD: f16 = 0.50;
@@ -22,9 +28,12 @@ pub const Manager = struct {
 
     active_store: ActiveStore = .primary,
 
+    gpa: std.mem.Allocator,
+
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
         // TODO: define remove callback ctx & fn
         var manager = Manager{
+            .gpa = allocator,
             .p_store = try m_store.Store.init(allocator, size),
             .probe = try probe.CacheProbe.init(allocator),
         };
@@ -55,6 +64,8 @@ pub const Manager = struct {
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
+        defer self.freeInactiveTable();
+
         const a_table = try self.getActiveTable();
         const node = a_table.get(key) catch |err| {
             if (err == m_store.StoreError.KeyNotFound) {
@@ -73,10 +84,14 @@ pub const Manager = struct {
                 // Better call migrate within the store and handle data there
                 // This is just a POC for myself
                 const node = try i_table.get(key);
-                const n_node = try a_table.set(key, node.value, node.tag);
+                const n_node = try self.set(key, node.value, node.tag, .{});
 
                 n_node.ttl = node.ttl;
                 n_node.expires = node.expires;
+
+                m_store.resetNode(node);
+
+                if (i_table.occupied > 0) i_table.occupied -= 1;
 
                 return n_node;
             }
@@ -89,13 +104,11 @@ pub const Manager = struct {
     // - add expiry set command
     // - all that kinds of fancy stuff
     // - will probably refer to redis commands for implementation
-    pub fn set(self: *Manager, key: []const u8, value: *anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !void {
+    pub fn set(self: *Manager, key: []const u8, value: *anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !*m_store.StoreNode {
         var store: ?m_store.Store = undefined;
+        const rehash_direction = try self.needsRehash();
 
-        //const needs_rehash = try self.needsRehash()
-        //if () {
-        //    self.rehash();
-        //}
+        try self.rehash(rehash_direction);
 
         store = try self.getActiveTable();
 
@@ -104,26 +117,28 @@ pub const Manager = struct {
 
             self.probe.add(new_node);
 
-            return;
+            return new_node;
         }
 
         // TODO: error
         return;
     }
 
+    // TODO: Remove
+
     fn getActiveTable(self: *Manager) !*m_store.Store {
         switch (self.active_store) {
             .primary => {
-                if (self.p_store) |store| {
-                    return &store;
+                if (self.p_store) |*store| {
+                    return store;
                 }
 
                 // TODO: Errors
                 return;
             },
             .secondary => {
-                if (self.s_store) |store| {
-                    return &store;
+                if (self.s_store) |*store| {
+                    return store;
                 }
 
                 // TODO: Errors
@@ -135,16 +150,16 @@ pub const Manager = struct {
     fn getInactiveTable(self: *Manager) !*m_store.Store {
         switch (self.active_store) {
             .primary => {
-                if (self.s_store) |store| {
-                    return &store;
+                if (self.s_store) |*store| {
+                    return store;
                 }
 
                 // TODO: Errors
                 return;
             },
             .secondary => {
-                if (self.p_store) |store| {
-                    return &store;
+                if (self.p_store) |*store| {
+                    return store;
                 }
 
                 // TODO: Errors
@@ -153,9 +168,49 @@ pub const Manager = struct {
         }
     }
 
-    fn needsRehash() !bool {
-        return false;
+    fn needsRehash(self: *Manager) RehashDirection {
+        const a_table = try self.getActiveTable();
+        const occupied: f16 = @floatCast(a_table.occupied);
+        const capacity: f16 = @floatCast(a_table.capacity);
+        const load = occupied / capacity;
+
+        if (load >= UPSIZE_THRESHOLD) return .up;
+        if (load <= DOWNSIZE_THRESHOLD and a_table.occupied > a_table.min_capacity) return .down;
+
+        return .none;
     }
 
-    fn rehash() !void {}
+    fn rehash(self: *Manager, direction: RehashDirection) !void {
+        switch (direction) {
+            .up => {
+                const a_store = try self.getActiveTable();
+                const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
+                const n_store = m_store.Store.init(self.gpa, n_size);
+
+                // TODO: Set new table to active position
+                //       Set old table to inactive
+                //       If old inactive table exists and is not empty then migrate remaining data? Drop it? What do?
+                //       If old inactive table is empty just nuke it from orbit first and then spawn them
+
+                return;
+            },
+            .down => {
+                return;
+            },
+            .none => {
+                return;
+            },
+        }
+    }
+
+    fn freeInactiveTable(self: *Manager) void {
+        var i_table = self.getInactiveTable() catch |err| {
+            std.debug.print("MANAGER: freeInactiveTable error: {}\n", .{err});
+        };
+
+        if (i_table.occupied == 0) {
+            i_table.deinit();
+            i_table = null;
+        }
+    }
 };
