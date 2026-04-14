@@ -132,6 +132,23 @@ pub const CacheProbe = struct {
         return error.NodeNotFound;
     }
 
+    pub fn swap(self: *CacheProbe, old_node: *s.StoreNode, new_node: *s.StoreNode) !void {
+        self.mu.lock();
+        self.mu.unlock();
+
+        var curr_opt = self.head;
+
+        while (curr_opt) |curr| {
+            if (curr.store_node == old_node) {
+                curr.store_node = new_node;
+                return;
+            }
+            curr_opt = curr.next;
+        }
+
+        return error.NodeNotFound;
+    }
+
     // Callbacks for external structs
     pub fn onRemove(ctx: *anyopaque, node: *s.StoreNode) void {
         const self: *CacheProbe = @ptrCast(@alignCast(ctx));

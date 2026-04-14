@@ -84,7 +84,11 @@ pub const Manager = struct {
                 // Better call migrate within the store and handle data there
                 // This is just a POC for myself
                 const node = try i_table.get(key);
-                const n_node = try self.set(key, node.value, node.tag, .{});
+                const n_node = try self.migrate(node) catch |m_err| {
+                    std.debug.print("MANAGER: migrate error: {}\n", .{m_err});
+
+                    return m_store.StoreError.KeyNotFound;
+                };
 
                 n_node.ttl = node.ttl;
                 n_node.expires = node.expires;
@@ -124,7 +128,30 @@ pub const Manager = struct {
         return;
     }
 
-    // TODO: Remove
+    // TODO: Remove fn
+
+    pub fn migrate(self: *Manager, node: *m_store.StoreNode) !*m_store.StoreNode {
+        const n_node = try self.set(node.key, node.value, node.tag, .{});
+        const i_table = self.getInactiveTable() catch |i_err| {
+            std.debug.print("MANAGER: get error: {}\n", .{i_err});
+
+            return m_store.StoreError.TableNotInitialized;
+        };
+
+        // Since I do not save initial options, and expiry would be shifted from now + original ttl
+        // I just basically save all the relevant values to it
+        // Perhaps zig has a better approach for this
+        n_node.ttl = node.ttl;
+        n_node.expires = node.expires;
+
+        if (n_node.expires > 0) {}
+
+        m_store.resetNode(node);
+
+        if (i_table.occupied > 0) i_table.occupied -= 1;
+
+        return n_node;
+    }
 
     fn getActiveTable(self: *Manager) !*m_store.Store {
         switch (self.active_store) {
@@ -168,7 +195,7 @@ pub const Manager = struct {
         }
     }
 
-    fn needsRehash(self: *Manager) RehashDirection {
+    pub fn needsRehash(self: *Manager) RehashDirection {
         const a_table = try self.getActiveTable();
         const occupied: f16 = @floatCast(a_table.occupied);
         const capacity: f16 = @floatCast(a_table.capacity);
@@ -180,7 +207,7 @@ pub const Manager = struct {
         return .none;
     }
 
-    fn rehash(self: *Manager, direction: RehashDirection) !void {
+    pub fn rehash(self: *Manager, direction: RehashDirection) !void {
         switch (direction) {
             .up => {
                 const a_store = try self.getActiveTable();
