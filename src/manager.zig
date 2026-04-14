@@ -67,6 +67,10 @@ pub const Manager = struct {
         defer self.freeInactiveTable();
 
         const a_table = try self.getActiveTable();
+
+        a_table.mu.lock();
+        defer a_table.mu.unlock();
+
         const node = a_table.get(key) catch |err| {
             if (err == m_store.StoreError.KeyNotFound) {
                 //TODO: Check if inactive store is allocated
@@ -81,10 +85,13 @@ pub const Manager = struct {
                     return m_store.StoreError.KeyNotFound;
                 };
 
+                i_table.mu.lock();
+                defer i_table.mu.unlock();
+
                 // Better call migrate within the store and handle data there
                 // This is just a POC for myself
                 const node = try i_table.get(key);
-                const n_node = try self.migrate(node) catch |m_err| {
+                const n_node = try self.migrateUnsafe(node) catch |m_err| {
                     std.debug.print("MANAGER: migrate error: {}\n", .{m_err});
 
                     return m_store.StoreError.KeyNotFound;
@@ -116,8 +123,11 @@ pub const Manager = struct {
 
         store = try self.getActiveTable();
 
-        if (store) |existing| {
-            const new_node = try existing.set(key, value, tag, opts);
+        if (store) |a_store| {
+            a_store.mu.lock();
+            a_store.mu.unlock();
+
+            const new_node = try a_store.set(key, value, tag, opts);
 
             self.probe.add(new_node);
 
@@ -130,13 +140,8 @@ pub const Manager = struct {
 
     // TODO: Remove fn
 
-    pub fn migrate(self: *Manager, node: *m_store.StoreNode) !*m_store.StoreNode {
+    pub fn migrateUnsafe(self: *Manager, i_table: *m_store.Store, node: *m_store.StoreNode) !*m_store.StoreNode {
         const n_node = try self.set(node.key, node.value, node.tag, .{});
-        const i_table = self.getInactiveTable() catch |i_err| {
-            std.debug.print("MANAGER: get error: {}\n", .{i_err});
-
-            return m_store.StoreError.TableNotInitialized;
-        };
 
         // Since I do not save initial options, and expiry would be shifted from now + original ttl
         // I just basically save all the relevant values to it
@@ -144,7 +149,9 @@ pub const Manager = struct {
         n_node.ttl = node.ttl;
         n_node.expires = node.expires;
 
-        if (n_node.expires > 0) {}
+        if (n_node.expires > 0) {
+            self.probe.swap(node, n_node);
+        }
 
         m_store.resetNode(node);
 

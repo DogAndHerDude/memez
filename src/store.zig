@@ -193,9 +193,6 @@ pub const Store = struct {
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
-        self.mu.lock();
-        defer self.mu.unlock();
-
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
 
@@ -237,6 +234,9 @@ pub const Store = struct {
 
     pub fn onRemove(ctx: *anyopaque, node: *StoreNode) void {
         const self: *Store = @ptrCast(@alignCast(ctx));
+
+        self.mu.lock();
+        defer self.mu.unlock();
 
         self.remove(node.key) catch |err| {
             std.debug.print("STORE: onRemove error: {}\n", .{err});
