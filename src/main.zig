@@ -10,6 +10,7 @@ pub fn main() !void {
     // TODO: read config.toml file
     // read min_mem_size
     // read max_mem_size
+    // LRU, LFU evac stuff, y'know
     const user_size_mb: usize = 512;
     const size_bytes = user_size_mb * 1024 * 1024;
 

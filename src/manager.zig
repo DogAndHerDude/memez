@@ -223,8 +223,10 @@ pub const Manager = struct {
 
                 if (self.active_store == .primary and self.s_store == null) {
                     self.s_store = n_store;
+                    self.active_store = .secondary;
                 } else if (self.active_store == .secondary and self.p_store == null) {
                     self.p_store = n_store;
+                    self.active_store = .primary;
                 } else {
                     // An oopsie occured
                     // But generally I should be dealing with the existing store somehow
