@@ -219,7 +219,17 @@ pub const Manager = struct {
             .up => {
                 const a_store = try self.getActiveTable();
                 const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
-                const n_store = m_store.Store.init(self.gpa, n_size);
+                const n_store = try m_store.Store.init(self.gpa, n_size);
+
+                if (self.active_store == .primary and self.s_store == null) {
+                    self.s_store = n_store;
+                } else if (self.active_store == .secondary and self.p_store == null) {
+                    self.p_store = n_store;
+                } else {
+                    // An oopsie occured
+                    // But generally I should be dealing with the existing store somehow
+                    n_store.deinit();
+                }
 
                 // TODO: Set new table to active position
                 //       Set old table to inactive
