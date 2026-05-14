@@ -21,12 +21,6 @@ fn onTick(
         // - otherwise just stop and wait for next tick
     }
 
-    //if (userdata) |probe| {
-    //    probe.scan() catch |err| {
-    //        std.debug.print("SCANNER: scan error: {}\n", .{err});
-    //    };
-    //}
-
     return .disarm;
 }
 
@@ -43,7 +37,7 @@ fn migrationLoop(manager: m.Manager) !void {
     try loop.run(.until_done);
 }
 
-
 fn spawn(manager: m.Manager) !void {
-    const migrator_trhead  = try std.Thread.spawn(.{}, migrationLoop, .{manager})
+    const migrator_trhead = try std.Thread.spawn(.{}, migrationLoop, .{manager});
+    defer migrator_trhead.join();
 }
