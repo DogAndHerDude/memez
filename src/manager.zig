@@ -24,22 +24,22 @@ pub const Manager = struct {
     //       swap values as necessary
     //       pass that to migrator thread
     //       avoid making pointers out of them for the cache miss
-    p_store: ?m_store.Store = null,
-    s_store: ?m_store.Store = null,
-
-    active_store: ActiveStore = .primary,
+    active_store: ?m_store.Store = null,
+    inactive_store: ?m_store.Store = null,
 
     active_store_ptr: ?*m_store.Store = null,
 
     gpa: std.mem.Allocator,
 
+    mu: std.Thread.Mutex = std.Thread.Mutex{},
+
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
         var manager = Manager{
             .gpa = allocator,
-            .p_store = try m_store.Store.init(allocator, size),
+            .active_store = try m_store.Store.init(allocator, size),
         };
 
-        if (manager.p_store) |*store| {
+        if (manager.active_store) |*store| {
             // TODO: Update PTR on rehash
             manager.active_store_ptr = store;
 
@@ -53,16 +53,16 @@ pub const Manager = struct {
     }
 
     pub fn deinit(self: *Manager) void {
-        if (self.p_store) |*store| {
+        if (self.active_store) |*store| {
             store.deinit();
         }
 
-        if (self.s_store) |*store| {
+        if (self.inactive_store) |*store| {
             store.deinit();
         }
 
-        self.p_store = null;
-        self.s_store = null;
+        self.active_store = null;
+        self.inactive_store = null;
         self.active_store_ptr = null;
     }
 
@@ -157,90 +157,52 @@ pub const Manager = struct {
         return n_node;
     }
 
-    fn getActiveTable(self: *Manager) !*m_store.Store {
-        switch (self.active_store) {
-            .primary => {
-                if (self.p_store) |*store| {
-                    return store;
-                }
+    pub fn needsRehash(self: *Manager) !RehashDirection {
+        if (self.active_store) |a_store| {
+            const occupied: f16 = @floatCast(a_store.occupied);
+            const capacity: f16 = @floatCast(a_store.capacity);
+            const load = occupied / capacity;
 
-                // TODO: Errors
-                return;
-            },
-            .secondary => {
-                if (self.s_store) |*store| {
-                    return store;
-                }
+            if (load >= UPSIZE_THRESHOLD) return .up;
+            if (load <= DOWNSIZE_THRESHOLD and a_store.occupied > a_store.min_capacity) return .down;
 
-                // TODO: Errors
-                return;
-            },
+            return .none;
         }
-    }
 
-    fn getInactiveTable(self: *Manager) !*m_store.Store {
-        switch (self.active_store) {
-            .primary => {
-                if (self.s_store) |*store| {
-                    return store;
-                }
-
-                // TODO: Errors
-                return;
-            },
-            .secondary => {
-                if (self.p_store) |*store| {
-                    return store;
-                }
-
-                // TODO: Errors
-                return;
-            },
-        }
-    }
-
-    pub fn needsRehash(self: *Manager) RehashDirection {
-        const a_table = try self.getActiveTable();
-        const occupied: f16 = @floatCast(a_table.occupied);
-        const capacity: f16 = @floatCast(a_table.capacity);
-        const load = occupied / capacity;
-
-        if (load >= UPSIZE_THRESHOLD) return .up;
-        if (load <= DOWNSIZE_THRESHOLD and a_table.occupied > a_table.min_capacity) return .down;
-
-        return .none;
+        // TODO: errors
+        return;
     }
 
     pub fn rehash(self: *Manager, direction: RehashDirection) !void {
         switch (direction) {
             .up => {
-                const a_store = try self.getActiveTable();
-                const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
-                const n_store = try m_store.Store.init(self.gpa, n_size);
+                self.mu.lock();
+                defer self.mu.unlock();
 
-                if (self.active_store == .primary and self.s_store == null) {
-                    self.s_store = n_store;
-                    self.active_store = .secondary;
-                } else if (self.active_store == .secondary and self.p_store == null) {
-                    self.p_store = n_store;
-                    self.active_store = .primary;
+                var n_store: ?m_store.Store = null;
+
+                if (self.active_store) |a_store| {
+                    const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
+                    n_store = try m_store.Store.init(self.gpa, n_size);
                 } else {
-                    // An oopsie occured
-                    // But generally I should be dealing with the existing store somehow
-                    // Note to self:
-                    // No free slot for a store available
-                    // We messed up man...
-                    // Run the migration tool fully and let it do its thing by force
-                    n_store.deinit();
+                    n_store.?.deinit();
+
+                    // TODO: errors, we done goof'd
+                    return;
                 }
 
-                // TODO: Set new table to active position
-                //       Set old table to inactive
-                //       If old inactive table exists and is not empty then migrate remaining data? Drop it? What do?
-                //          - Generally I'll be running another thread for active rehash and granting 1ms of workload every 100ms to migrate or idx % 64 == 0
-                //          - This will allow to actively migrate and check for any rehash needs instead of lazy which can fill up the whole table and explode it
-                //       If old inactive table is empty just nuke it from orbit first and then spawn them
+                if (n_store and self.inactive_store == null) |new_store| {
+                    self.inactive_store = self.active_store;
+                    self.active_store = new_store;
 
+                    return;
+                }
+
+                if (n_store and self.inactive_store != null) {
+                    // Gotta force migrate otherwise we're screwed
+                }
+
+                // We done goof'd here too
                 return;
             },
             .down => {

@@ -3,9 +3,7 @@ const xev = @import("xev");
 const p = @import("probe.zig");
 const s = @import("store.zig");
 
-// A large prime number for massive spatial scattering
-const PRIME_STEP: usize = 131071;
-const MAX_RUNS_PER_TICK: usize = 20;
+const MAX_RUNS_PER_TICK: usize = 25;
 
 fn onTick(
     userdata: ?*p.s.Store,
@@ -45,7 +43,6 @@ fn onTick(
 }
 
 fn scanLoop(probe: *p.CacheProbe) !void {
-    // in your spawn or init
     var loop = try xev.Loop.init(.{});
     defer loop.deinit();
 
