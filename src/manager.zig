@@ -73,12 +73,6 @@ pub const Manager = struct {
 
         const node = a_table.get(key) catch |err| {
             if (err == m_store.StoreError.KeyNotFound) {
-                //TODO: Check if inactive store is allocated
-                //      if true then check for key there
-                //      if found, migrate it to new table
-                //      then return pointer from the new table
-                //      swap the address in the probe
-
                 const i_table = self.getInactiveTable() catch |i_err| {
                     std.debug.print("MANAGER: get error: {}\n", .{i_err});
 
@@ -230,6 +224,10 @@ pub const Manager = struct {
                 } else {
                     // An oopsie occured
                     // But generally I should be dealing with the existing store somehow
+                    // Note to self:
+                    // No free slot for a store available
+                    // We messed up man...
+                    // Run the migration tool fully and let it do its thing by force
                     n_store.deinit();
                 }
 

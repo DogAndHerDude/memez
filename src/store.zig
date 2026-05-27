@@ -48,12 +48,6 @@ const SetOptions = struct {
 };
 
 pub const Store = struct {
-    const UPSIZE_THRESHOLD: f16 = 0.75;
-    const DOWNSIZE_THRESHOLD: f16 = 0.50;
-
-    const UPSIZE_FACTOR: usize = 2;
-    const DOWNSIZE_FACTOR: usize = 2;
-
     min_capacity: usize,
 
     table: []StoreNode,
@@ -150,7 +144,7 @@ pub const Store = struct {
             .value = value,
             .tag = tag,
             .ttl = opts.ttl,
-            .expires = expires_at, // TODO: check remaining options for setting
+            .expires = expires_at,
             .psl = 0,
         };
 
@@ -160,20 +154,19 @@ pub const Store = struct {
         while (true) {
             const current_node = &self.table[idx];
 
-            if (current_node.state == .empty or current_node.state == .deleted) {
+            if (opts.nx and current_node.state == .empty or current_node.state == .deleted) {
                 self.table[idx] = new_node;
                 self.occupied += 1;
 
                 if (current_node.state == .deleted and self.deleted > 0) self.deleted -= 1;
 
-                return &new_node;
+                return &self.table[idx];
             }
 
-            // Overwrite existing matching value
-            if (current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
+            if (opts.xx and current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
                 self.table[idx] = new_node;
 
-                return &new_node;
+                return &self.table[idx];
             }
 
             // Shift them around, shake 'em up
@@ -205,8 +198,6 @@ pub const Store = struct {
         node.state = .deleted;
         if (self.occupied > 0) self.occupied -= 1;
         self.deleted += 1;
-
-        // TODO: if p_deleted + p_migrated == p_capacity we can then free and realloc the list
 
         var n_i_psl = idx + 1;
 
