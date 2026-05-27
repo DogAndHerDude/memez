@@ -38,6 +38,8 @@ fn onTick(
                     }
 
                     a_store.set(node.key, node.value, node.tag, .{ .ttl = node.ttl });
+
+                    node.state = .deleted;
                 }
 
                 // TODO: deinit inactive store, default to null
