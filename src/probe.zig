@@ -16,6 +16,8 @@ fn onTick(
     _ = result catch unreachable;
 
     if (userdata) |store| {
+        // NOTE: technically it can pick same node twice or more
+        //       should use a seed route instead
         const r_now: u64 = @intCast(std.time.timestamp());
         var checked: usize = 0;
         var prng = std.Random.DefaultPrng.init(r_now);
