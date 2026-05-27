@@ -24,29 +24,27 @@ pub const Manager = struct {
     p_store: ?m_store.Store = null,
     s_store: ?m_store.Store = null,
 
-    probe: probe.CacheProbe,
-
     active_store: ActiveStore = .primary,
+
+    active_store_ptr: ?*m_store.Store = null,
 
     gpa: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
-        // TODO: define remove callback ctx & fn
         var manager = Manager{
             .gpa = allocator,
             .p_store = try m_store.Store.init(allocator, size),
-            .probe = try probe.CacheProbe.init(allocator),
         };
 
         if (manager.p_store) |*store| {
             store.on_remove = &probe.CacheProbe.onRemove;
             store.on_remove_ctx = &manager.probe;
+
+            // TODO: Update PTR on rehash
+            manager.active_store_ptr = store;
+
+            try scanner.spawn(store);
         }
-
-        manager.probe.on_remove = &m_store.Store.onRemove;
-        manager.probe.on_remove_ctx = &manager.p_store;
-
-        try scanner.spawn(&manager.probe);
 
         return manager;
     }
@@ -60,7 +58,9 @@ pub const Manager = struct {
             store.deinit();
         }
 
-        self.probe.deinit();
+        self.p_store = null;
+        self.s_store = null;
+        self.active_store_ptr = null;
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {

@@ -1,9 +1,12 @@
 const std = @import("std");
 const xev = @import("xev");
 const p = @import("probe.zig");
+const s = @import("store.zig");
+
+const MAX_RUNS_PER_TICK: usize = 20;
 
 fn onTick(
-    userdata: ?*p.CacheProbe,
+    userdata: ?*p.s.Store,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
@@ -12,10 +15,27 @@ fn onTick(
     _ = c;
     _ = result catch unreachable;
 
-    if (userdata) |probe| {
-        probe.scan() catch |err| {
-            std.debug.print("SCANNER: scan error: {}\n", .{err});
-        };
+    if (userdata) |store| {
+        var checked: usize = 0;
+        var cursor: usize = 0; // This could cause issues
+
+        store.mu.lock();
+        defer store.mu.unlock();
+
+        while (checked < std.math.min(MAX_RUNS_PER_TICK, store.capacity)) : (checked += 1) {
+            cursor = (cursor + 1) % store.capacity; // Sequantial, replace with random access
+
+            const now: u64 = @intCast(std.time.timestamp());
+            const node = &store.table[cursor];
+
+            if (node.state == .occupied) {
+                if (node.expires > now) {
+                    continue;
+                }
+
+                node.state = .deleted;
+            }
+        }
     }
 
     return .disarm;
@@ -35,7 +55,7 @@ fn scanLoop(probe: *p.CacheProbe) !void {
     try loop.run(.until_done);
 }
 
-pub fn spawn(probe: *p.CacheProbe) !void {
-    const probe_thread = try std.Thread.spawn(.{}, scanLoop, .{probe});
+pub fn spawn(active_store_ptr: *s.Store) !void {
+    const probe_thread = try std.Thread.spawn(.{}, scanLoop, .{active_store_ptr});
     defer probe_thread.join();
 }

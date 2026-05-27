@@ -59,10 +59,6 @@ pub const Store = struct {
 
     mu: std.Thread.Mutex = std.Thread.Mutex{},
 
-    // Callbacks for the probe
-    on_remove: ?*const fn (*anyopaque, *StoreNode) void = null,
-    on_remove_ctx: ?*anyopaque = null,
-
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
     pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
@@ -94,7 +90,7 @@ pub const Store = struct {
 
         if (std.mem.eql(u8, key, node.key)) {
             if (node.expires <= now) {
-                self.removeAndBroadcast(node.key, node);
+                self.remove(node.key);
 
                 return StoreError.KeyNotFound;
             }
@@ -117,7 +113,7 @@ pub const Store = struct {
 
             if (std.mem.eql(u8, key, n_node.key)) {
                 if (node.expires <= now) {
-                    self.removeAndBroadcast(node.key, node);
+                    self.remove(node.key);
 
                     return StoreError.KeyNotFound;
                 }
@@ -229,17 +225,6 @@ pub const Store = struct {
         self.remove(node.key) catch |err| {
             std.debug.print("STORE: onRemove error: {}\n", .{err});
         };
-    }
-
-    fn removeAndBroadcast(self: *Store, key: []const u8, node: *StoreNode) !void {
-        if (self.on_remove) |cb| {
-            // Remove from the scanner probe first, since it's a double linked list, then remove it here
-            try cb(self.on_remove_ctx.?, node);
-        }
-
-        // The lookup is O(1) either way, didn't wanna reimplement the same remove function just by passing a node
-        // Plus you need to iterrate through the current hash table to change the psl either way
-        try self.remove(key);
     }
 };
 
