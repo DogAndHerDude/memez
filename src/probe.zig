@@ -1,188 +1,64 @@
 const std = @import("std");
+const xev = @import("xev");
+const p = @import("probe.zig");
 const s = @import("store.zig");
 
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!! NOTE !!!!!!!!!!!!!!!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// Switch to using the passed hash table for the future
-// Less overhead checking for order
-// I can utilize lazy expiry easier
-// I can run a 100ms scan and pick x random items
-// I can scan again if I deleted 25% of them
-// If not, just go back to sleep
-// Goodnight
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// A large prime number for massive spatial scattering
+const PRIME_STEP: usize = 131071;
+const MAX_RUNS_PER_TICK: usize = 20;
 
-const ProbeNode = struct {
-    store_node: *s.StoreNode,
-    next: ?*ProbeNode = null,
-    prev: ?*ProbeNode = null,
-};
+fn onTick(
+    userdata: ?*p.s.Store,
+    loop: *xev.Loop,
+    c: *xev.Completion,
+    result: xev.Timer.RunError!void,
+) xev.CallbackAction {
+    _ = loop;
+    _ = c;
+    _ = result catch unreachable;
 
-// Not currently used until I change the allocator used for the store
+    if (userdata) |store| {
+        const r_now: u64 = @intCast(std.time.timestamp());
+        var checked: usize = 0;
+        var prng = std.Random.DefaultPrng.init(r_now);
+        const rand = prng.random();
 
-pub const CacheProbe = struct {
-    head: ?*ProbeNode = null,
-    tail: ?*ProbeNode = null,
-    size: usize = 0,
+        store.mu.lock();
+        defer store.mu.unlock();
 
-    mu: std.Thread.Mutex = std.Thread.Mutex{},
+        while (checked < std.math.min(MAX_RUNS_PER_TICK, store.capacity)) : (checked += 1) {
+            const idx = rand.intRangeLessThan(usize, 0, store.capacity);
+            const now: u64 = @intCast(std.time.timestamp());
+            const node = &store.table[idx];
 
-    // Callabacks for the store
-    on_remove: ?*const fn (*anyopaque, *s.StoreNode) void = null,
-    on_remove_ctx: ?*anyopaque = null,
-
-    gpa: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) !CacheProbe {
-        return CacheProbe{
-            .gpa = allocator,
-        };
-    }
-
-    pub fn deinit(self: *CacheProbe) void {
-        var probe_node = self.head;
-
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        while (probe_node) |current| {
-            probe_node = current.next;
-
-            self.gpa.destroy(current);
-        }
-    }
-
-    pub fn add(self: *CacheProbe, node: *s.StoreNode) !void {
-        const probe_node = try self.gpa.create(ProbeNode);
-
-        probe_node.* = .{
-            .store_node = node,
-        };
-
-        if (self.head == null) {
-            self.head = probe_node;
-            self.tail = probe_node;
-            self.size += 1;
-
-            return;
-        }
-
-        if (node.expires < self.head.?.store_node.expires) {
-            self.head.prev = probe_node;
-            probe_node.next = self.head;
-            probe_node.prev = null;
-            self.head = probe_node;
-            self.size += 1;
-
-            return;
-        }
-
-        if (node.expires >= self.tail.?.store_node.expires) {
-            probe_node.prev = self.tail;
-            probe_node.next = null;
-            self.tail.?.next = probe_node;
-            self.tail = probe_node;
-            self.size += 1;
-
-            return;
-        }
-
-        var curr_opt = self.head;
-
-        while (curr_opt) |curr| {
-            if (curr.store_node.expires < node.expires) {
-                probe_node.next = curr;
-                probe_node.prev = curr.prev;
-
-                if (curr.prev) |p| {
-                    p.next = probe_node;
+            if (node.state == .occupied) {
+                if (node.expires > now) {
+                    continue;
                 }
 
-                curr.prev = probe_node;
-
-                self.size += 1;
-
-                return;
+                node.state = .deleted;
             }
-
-            curr_opt = curr.next;
         }
     }
 
-    pub fn remove(self: *CacheProbe, node: *s.StoreNode) !void {
-        var curr_opt = self.head;
+    return .disarm;
+}
 
-        while (curr_opt) |curr| {
-            if (curr.store_node == node) {
-                if (curr == self.head) self.head = curr.next;
-                if (curr == self.tail) self.tail = curr.prev;
+fn scanLoop(probe: *p.CacheProbe) !void {
+    // in your spawn or init
+    var loop = try xev.Loop.init(.{});
+    defer loop.deinit();
 
-                if (curr.prev) |prev| prev.next = curr.next;
-                if (curr.next) |next| next.prev = curr.prev;
+    var timer = try xev.Timer.init();
+    defer timer.deinit();
 
-                if (self.size > 0) self.size -= 1;
+    var c: xev.Completion = undefined;
+    timer.run(&loop, &c, 100, p.CacheProbe, probe, onTick);
 
-                self.gpa.destroy(curr);
-                return;
-            }
-            curr_opt = curr.next;
-        }
+    try loop.run(.until_done);
+}
 
-        return error.NodeNotFound;
-    }
-
-    pub fn swap(self: *CacheProbe, old_node: *s.StoreNode, new_node: *s.StoreNode) !void {
-        self.mu.lock();
-        self.mu.unlock();
-
-        var curr_opt = self.head;
-
-        while (curr_opt) |curr| {
-            if (curr.store_node == old_node) {
-                curr.store_node = new_node;
-                return;
-            }
-            curr_opt = curr.next;
-        }
-
-        return error.NodeNotFound;
-    }
-
-    // Callbacks for external structs
-    pub fn onRemove(ctx: *anyopaque, node: *s.StoreNode) void {
-        const self: *CacheProbe = @ptrCast(@alignCast(ctx));
-
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        self.remove(node) catch |err| {
-            std.debug.print("onRemove error: {}\n", .{err});
-        };
-    }
-
-    pub fn scan(self: *CacheProbe) !void {
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        var current_node = self.head;
-        const now: u64 = @intCast(std.time.timestamp());
-
-        while (current_node) |node| {
-            if (node.store_node.expires > now) {
-                // Everything after this is later, no point scanning further, save them CPU cycles, save the planet
-                return;
-            }
-
-            const next = node.next;
-
-            try self.remove(node.store_node);
-
-            if (self.on_remove) |cb| {
-                cb(self.on_remove_ctx.?, node.store_node);
-            }
-
-            current_node = next;
-        }
-    }
-};
+pub fn spawn(active_store_ptr: *s.Store) !void {
+    const probe_thread = try std.Thread.spawn(.{}, scanLoop, .{active_store_ptr});
+    defer probe_thread.join();
+}

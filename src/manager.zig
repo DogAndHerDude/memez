@@ -1,7 +1,6 @@
 const std = @import("std");
 const m_store = @import("store.zig");
 const probe = @import("probe.zig");
-const scanner = @import("scanner.zig");
 
 const ActiveStore = enum {
     primary,
@@ -21,6 +20,10 @@ pub const Manager = struct {
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
+    // TODO: refactor to a tuple or active/inactive stores
+    //       swap values as necessary
+    //       pass that to migrator thread
+    //       avoid making pointers out of them for the cache miss
     p_store: ?m_store.Store = null,
     s_store: ?m_store.Store = null,
 
@@ -37,16 +40,16 @@ pub const Manager = struct {
         };
 
         if (manager.p_store) |*store| {
-            store.on_remove = &probe.CacheProbe.onRemove;
-            store.on_remove_ctx = &manager.probe;
-
             // TODO: Update PTR on rehash
             manager.active_store_ptr = store;
 
-            try scanner.spawn(store);
+            try probe.spawn(store);
+
+            return manager;
         }
 
-        return manager;
+        // TODO: errors, cause we done goofed major!
+        return;
     }
 
     pub fn deinit(self: *Manager) void {
