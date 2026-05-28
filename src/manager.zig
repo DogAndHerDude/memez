@@ -67,7 +67,7 @@ pub const Manager = struct {
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
-        defer self.freeInactiveTable();
+        defer self.freeInactiveTableVOLATILE();
 
         const a_table = try self.getActiveTable();
 
@@ -214,14 +214,10 @@ pub const Manager = struct {
         }
     }
 
-    fn freeInactiveTable(self: *Manager) void {
-        var i_table = self.getInactiveTable() catch |err| {
-            std.debug.print("MANAGER: freeInactiveTable error: {}\n", .{err});
-        };
-
-        if (i_table.occupied == 0) {
-            i_table.deinit();
-            i_table = null;
+    fn freeInactiveTableVOLATILE(self: *Manager) void {
+        if (self.inactive_store) |i_store| {
+            i_store.deinit();
+            i_store = null;
         }
     }
 };

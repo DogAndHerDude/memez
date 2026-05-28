@@ -2,7 +2,13 @@ const std = @import("std");
 const xev = @import("xev");
 const m = @import("manager.zig");
 
-const MAX_RUNS_PER_TICK: usize = 25;
+// HUGE NOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOTE:
+// Swap to a linear sweep and track items sweeped
+// in a persistant context.
+// Otherwise when it hits high enough migration count
+// we'll miss those nodes letting the loop dangle,
+// trying hard, never finishing... There is a joke in there somewhere.
+// Linear will take a while but guarantees that it will be freed. At some point.
 
 fn onTick(
     userdata: ?*m.Manager,
@@ -10,44 +16,62 @@ fn onTick(
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
 ) xev.CallbackAction {
-    _ = loop;
-    _ = c;
     _ = result catch unreachable;
 
     if (userdata) |manager| {
-        const r_now: u64 = @intCast(std.time.timestamp());
-        var checked: usize = 0;
-        var prng = std.Random.DefaultPrng.init(r_now);
+        const i_store = manager.inactive_store orelse .disarm;
+        const a_store = manager.active_store orelse .disarm;
+
+        i_store.mu.lock();
+        a_store.mu.lock();
+        defer i_store.mu.unlock();
+        defer a_store.mu.unlock();
+
+        if (i_store.occupied == 0) {
+            manager.freeInactiveStoreVOLATILE();
+            return .disarm;
+        }
+
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
         const rand = prng.random();
-        const inactive_store = manager.inactive_store;
-        const active_store = manager.active_store;
 
-        if (inactive_store) |i_store| {
-            if (active_store) |a_store| {
-                i_store.mu.lock();
-                a_store.mu.lock();
-                defer i_store.mu.unlock();
-                defer a_store.mu.unlock();
+        var checked: usize = 0;
+        var migrated: usize = 0;
+        const max_samples: usize = 20;
 
-                while (checked < std.math.min(MAX_RUNS_PER_TICK, i_store.capacity)) : (checked += 1) {
-                    const idx = rand.intRangeLessThan(usize, 0, i_store.capacity);
-                    const node = &i_store.table[idx];
+        while (checked < max_samples) : (checked += 1) {
+            const idx = rand.intRangeLessThan(usize, 0, i_store.table.len);
+            const node = &i_store.table[idx];
 
-                    if (node.state != .occupied) {
-                        continue;
-                    }
-
-                    a_store.set(node.key, node.value, node.tag, .{ .ttl = node.ttl });
-
-                    node.state = .deleted;
-                }
-
-                // TODO: deinit inactive store, default to null
+            if (node.state != .occupied) {
+                continue;
             }
+
+            a_store.set(node.key, node.value, node.tag, .{ .ttl = node.ttl });
+
+            node.state = .deleted;
+            i_store.occupied -= 1;
+            migrated += 1;
+
+            if (i_store.occupied == 0) break;
+        }
+
+        if (i_store.occupied == 0) {
+            manager.freeInactiveStoreVOLATILE();
+            return .disarm;
+        }
+
+        const threshold = max_samples / 4;
+        if (migrated > threshold) {
+            c.op.timer.timer.reset(loop, c, 0, m.Manager, manager) catch {
+                return .rearm;
+            };
+
+            return .disarm;
         }
     }
 
-    return .disarm;
+    return .rearm;
 }
 
 fn migrationLoop(manager: m.Manager) !void {

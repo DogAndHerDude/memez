@@ -37,6 +37,9 @@ fn onTick(
                 }
 
                 node.state = .deleted;
+                if (store.occupied > 0) {
+                    store.occupied -= 1;
+                }
             }
         }
     }
