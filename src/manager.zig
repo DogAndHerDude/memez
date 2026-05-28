@@ -70,8 +70,8 @@ pub const Manager = struct {
         // TODO: errors;
         const a_table = self.active_store orelse return;
 
-        a_table.mu.lock();
-        defer a_table.mu.unlock();
+        a_table.mu.lock(a_table.io);
+        defer a_table.mu.unlock(a_table.io);
 
         const node = a_table.get(key) catch |err| {
             if (err == m_store.StoreError.KeyNotFound) {
@@ -79,8 +79,8 @@ pub const Manager = struct {
                     return m_store.StoreError.KeyNotFound;
                 };
 
-                i_table.mu.lock();
-                defer i_table.mu.unlock();
+                i_table.mu.lock(i_table.io);
+                defer i_table.mu.unlock(i_table.io);
 
                 // Better call migrate within the store and handle data there
                 // This is just a POC for myself
@@ -173,8 +173,8 @@ pub const Manager = struct {
     pub fn rehash(self: *Manager, direction: RehashDirection) !void {
         switch (direction) {
             .up => {
-                self.mu.lock();
-                defer self.mu.unlock();
+                self.mu.lock(self.io);
+                defer self.mu.unlock(self.io);
 
                 var n_store: ?m_store.Store = null;
 

@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
-    const xev = b.dependency("libxev", .{ .target = target, .optimize = optimize });
+    const xev = b.dependency("xev", .{ .target = target, .optimize = optimize });
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function

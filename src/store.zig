@@ -217,17 +217,6 @@ pub const Store = struct {
 
         return;
     }
-
-    pub fn onRemove(ctx: *anyopaque, node: *StoreNode) void {
-        const self: *Store = @ptrCast(@alignCast(ctx));
-
-        self.mu.lock();
-        defer self.mu.unlock();
-
-        self.remove(node.key) catch |err| {
-            std.debug.print("STORE: onRemove error: {}\n", .{err});
-        };
-    }
 };
 
 pub fn resetNode(node: *StoreNode) void {
