@@ -20,10 +20,6 @@ pub const Manager = struct {
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
-    // TODO: refactor to a tuple or active/inactive stores
-    //       swap values as necessary
-    //       pass that to migrator thread
-    //       avoid making pointers out of them for the cache miss
     active_store: ?m_store.Store = null,
     inactive_store: ?m_store.Store = null,
 
@@ -31,12 +27,14 @@ pub const Manager = struct {
 
     gpa: std.mem.Allocator,
 
-    mu: std.Thread.Mutex = std.Thread.Mutex{},
+    io: std.Io,
+    mu: std.Io.Mutex = .init,
 
-    pub fn init(allocator: std.mem.Allocator, size: usize) !Manager {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) !Manager {
         var manager = Manager{
+            .io = io,
             .gpa = allocator,
-            .active_store = try m_store.Store.init(allocator, size),
+            .active_store = try m_store.Store.init(allocator, io, size),
         };
 
         if (manager.active_store) |*store| {
@@ -69,16 +67,15 @@ pub const Manager = struct {
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
         defer self.freeInactiveTableVOLATILE();
 
-        const a_table = try self.getActiveTable();
+        // TODO: errors;
+        const a_table = self.active_store orelse return;
 
         a_table.mu.lock();
         defer a_table.mu.unlock();
 
         const node = a_table.get(key) catch |err| {
             if (err == m_store.StoreError.KeyNotFound) {
-                const i_table = self.getInactiveTable() catch |i_err| {
-                    std.debug.print("MANAGER: get error: {}\n", .{i_err});
-
+                const i_table = self.inactive_store orelse {
                     return m_store.StoreError.KeyNotFound;
                 };
 
@@ -88,7 +85,7 @@ pub const Manager = struct {
                 // Better call migrate within the store and handle data there
                 // This is just a POC for myself
                 const node = try i_table.get(key);
-                const n_node = try self.migrateUnsafe(node) catch |m_err| {
+                const n_node = self.migrateUnsafe(node) catch |m_err| {
                     std.debug.print("MANAGER: migrate error: {}\n", .{m_err});
 
                     return m_store.StoreError.KeyNotFound;
@@ -118,7 +115,7 @@ pub const Manager = struct {
 
         try self.rehash(rehash_direction);
 
-        store = try self.getActiveTable();
+        store = self.active_store orelse return m_store.StoreError.TableNotInitialized;
 
         if (store) |a_store| {
             a_store.mu.lock();

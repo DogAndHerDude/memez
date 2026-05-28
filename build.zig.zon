@@ -22,20 +22,16 @@
     // original project's identity. Thus it is recommended to leave the comment
     // on the following line intact, so that it shows up in code reviews that
     // modify the field.
-    .fingerprint = 0x432d1c639c96575d, // Changing this has security and trust implications.
+    .fingerprint = 0x432d1c63e9fdcd75, // Changing this has security and trust implications.
     // Tracks the earliest Zig version that the package considers to be a
     // supported use case.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .libxev = .{
-            .url = "https://github.com/mitchellh/libxev/archive/d398cba9bf711fa4dd21c48bf73d25e4d8986408.tar.gz",
-            .hash = "libxev-0.0.0-86vtc689EwAjQWysidPm9NKkAwwUNByiE3kZTg_xu0Hp",
-        },
         // See `zig fetch --save <url>` for a command-line interface for adding dependencies.
         //.example = .{
         //    // When updating this field to a new URL, be sure to delete the corresponding

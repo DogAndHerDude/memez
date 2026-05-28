@@ -22,10 +22,10 @@ fn onTick(
         const i_store = manager.inactive_store orelse .disarm;
         const a_store = manager.active_store orelse .disarm;
 
-        i_store.mu.lock();
-        a_store.mu.lock();
-        defer i_store.mu.unlock();
-        defer a_store.mu.unlock();
+        i_store.mu.lock(i_store.io);
+        a_store.mu.lock(a_store.io);
+        defer i_store.mu.unlock(i_store.io);
+        defer a_store.mu.unlock(a_store.io);
 
         if (i_store.occupied == 0) {
             manager.freeInactiveStoreVOLATILE();

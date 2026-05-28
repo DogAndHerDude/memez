@@ -57,11 +57,12 @@ pub const Store = struct {
 
     gpa: std.mem.Allocator,
 
-    mu: std.Thread.Mutex = std.Thread.Mutex{},
+    io: std.Io,
+    mu: std.Io.Mutex = .init,
 
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
-    pub fn init(allocator: std.mem.Allocator, size: usize) !Store {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) !Store {
         const max_items = size / @sizeOf(StoreNode);
         const buf = try allocator.alloc(StoreNode, max_items);
 
@@ -69,6 +70,7 @@ pub const Store = struct {
             .min_capacity = max_items,
             .table = buf,
             .capacity = max_items,
+            .io = io,
             .gpa = allocator,
         };
     }

@@ -1,12 +1,11 @@
 const std = @import("std");
 const xev = @import("xev");
-const p = @import("probe.zig");
 const s = @import("store.zig");
 
 const MAX_RUNS_PER_TICK: usize = 25;
 
 fn onTick(
-    userdata: ?*p.s.Store,
+    userdata: ?*s.Store,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
@@ -23,8 +22,8 @@ fn onTick(
         var prng = std.Random.DefaultPrng.init(r_now);
         const rand = prng.random();
 
-        store.mu.lock();
-        defer store.mu.unlock();
+        store.mu.lock(store.io);
+        defer store.mu.unlock(store.io);
 
         while (checked < std.math.min(MAX_RUNS_PER_TICK, store.capacity)) : (checked += 1) {
             const idx = rand.intRangeLessThan(usize, 0, store.capacity);
@@ -47,7 +46,7 @@ fn onTick(
     return .disarm;
 }
 
-fn scanLoop(probe: *p.CacheProbe) !void {
+fn scanLoop(probe: *s.Store) !void {
     var loop = try xev.Loop.init(.{});
     defer loop.deinit();
 
@@ -55,7 +54,7 @@ fn scanLoop(probe: *p.CacheProbe) !void {
     defer timer.deinit();
 
     var c: xev.Completion = undefined;
-    timer.run(&loop, &c, 100, p.CacheProbe, probe, onTick);
+    timer.run(&loop, &c, 100, s.Store, probe, onTick);
 
     try loop.run(.until_done);
 }
