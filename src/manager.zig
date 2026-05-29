@@ -46,7 +46,7 @@ pub const Manager = struct {
             // TODO: Update PTR on rehash
             manager.active_store_ptr = store;
 
-            probe.spawn(store) catch |err| {
+            probe.spawn(store, io) catch |err| {
                 std.log.err("MANAGER: failed to spawn probe: {}", .{err});
                 return ManagerError.FailedToInitialize;
             };

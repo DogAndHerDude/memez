@@ -4,8 +4,13 @@ const s = @import("store.zig");
 
 const MAX_RUNS_PER_TICK: usize = 25;
 
+const ProbeContext = struct {
+    io: std.Io,
+    store: *s.Store,
+};
+
 fn onTick(
-    userdata: ?*s.Store,
+    userdata: *ProbeContext,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
@@ -14,31 +19,31 @@ fn onTick(
     _ = c;
     _ = result catch unreachable;
 
-    if (userdata) |store| {
-        // NOTE: technically it can pick same node twice or more
-        //       should use a seed route instead
-        const r_now: u64 = @intCast(std.time.nanoTimestamp());
-        var checked: usize = 0;
-        var prng = std.Random.DefaultPrng.init(r_now);
-        const rand = prng.random();
+    const io = userdata.io;
+    const store = userdata.store;
+    // NOTE: technically it can pick same node twice or more
+    //       should use a seed route instead
+    const r_now: u64 = @intCast(std.Io.Clock.now(.real, io).toNanoseconds());
+    var checked: usize = 0;
+    var prng = std.Random.DefaultPrng.init(r_now);
+    const rand = prng.random();
 
-        store.mu.lock(store.io);
-        defer store.mu.unlock(store.io);
+    store.mu.lock(store.io);
+    defer store.mu.unlock(store.io);
 
-        while (checked < std.math.min(MAX_RUNS_PER_TICK, store.capacity)) : (checked += 1) {
-            const idx = rand.intRangeLessThan(usize, 0, store.capacity);
-            const now: u64 = @intCast(std.time.timestamp());
-            const node = &store.table[idx];
+    while (checked < std.math.min(MAX_RUNS_PER_TICK, store.capacity)) : (checked += 1) {
+        const idx = rand.intRangeLessThan(usize, 0, store.capacity);
+        const now: u64 = @intCast(std.Io.Clock.now(.real, io).toNanoseconds());
+        const node = &store.table[idx];
 
-            if (node.state == .occupied) {
-                if (node.expires > now) {
-                    continue;
-                }
+        if (node.state == .occupied) {
+            if (node.expires > now) {
+                continue;
+            }
 
-                node.state = .deleted;
-                if (store.occupied > 0) {
-                    store.occupied -= 1;
-                }
+            node.state = .deleted;
+            if (store.occupied > 0) {
+                store.occupied -= 1;
             }
         }
     }
@@ -59,7 +64,11 @@ fn scanLoop(probe: *s.Store) !void {
     try loop.run(.until_done);
 }
 
-pub fn spawn(active_store_ptr: *s.Store) !void {
-    const probe_thread = try std.Thread.spawn(.{}, scanLoop, .{active_store_ptr});
+pub fn spawn(active_store_ptr: *s.Store, io: std.Io) !void {
+    const ctx: ProbeContext = .{
+        .io = io,
+        .store = active_store_ptr,
+    };
+    const probe_thread = try std.Thread.spawn(.{}, scanLoop, .{ctx});
     defer probe_thread.join();
 }

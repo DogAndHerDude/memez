@@ -10,65 +10,71 @@ const m = @import("manager.zig");
 // trying hard, never finishing... There is a joke in there somewhere.
 // Linear will take a while but guarantees that it will be freed. At some point.
 
+const MigratorContext = struct {
+    io: std.Io,
+    manager: *m.Manager,
+    prefer_linear_scan: bool,
+};
+
 fn onTick(
-    userdata: ?*m.Manager,
+    userdata: *MigratorContext,
     loop: *xev.Loop,
     c: *xev.Completion,
     result: xev.Timer.RunError!void,
 ) xev.CallbackAction {
     _ = result catch unreachable;
 
-    if (userdata) |manager| {
-        const i_store = manager.inactive_store orelse .disarm;
-        const a_store = manager.active_store orelse .disarm;
+    const io = userdata.io;
+    const manager = userdata.manager;
+    const i_store = manager.inactive_store orelse return .disarm;
+    const a_store = manager.active_store orelse return .disarm;
 
-        i_store.mu.lock(i_store.io);
-        a_store.mu.lock(a_store.io);
-        defer i_store.mu.unlock(i_store.io);
-        defer a_store.mu.unlock(a_store.io);
+    i_store.mu.lock(i_store.io);
+    a_store.mu.lock(a_store.io);
+    defer i_store.mu.unlock(i_store.io);
+    defer a_store.mu.unlock(a_store.io);
 
-        if (i_store.occupied == 0) {
-            manager.freeInactiveStoreVOLATILE();
-            return .disarm;
+    if (i_store.occupied == 0) {
+        manager.freeInactiveStoreVOLATILE();
+        return .disarm;
+    }
+
+    var prng = std.Random.DefaultPrng.init(std.Io.Clock.now(.real, io).toNanoseconds());
+    const rand = prng.random();
+
+    var checked: usize = 0;
+    var migrated: usize = 0;
+    const max_samples: usize = 20;
+
+    while (checked < max_samples) : (checked += 1) {
+        const idx = rand.intRangeLessThan(usize, 0, i_store.table.len);
+        const node = &i_store.table[idx];
+
+        if (node.state != .occupied) {
+            continue;
         }
 
-        var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-        const rand = prng.random();
+        a_store.set(node.key, node.value, node.tag, .{ .ttl = node.ttl });
 
-        var checked: usize = 0;
-        var migrated: usize = 0;
-        const max_samples: usize = 20;
+        node.state = .deleted;
+        i_store.occupied -= 1;
+        migrated += 1;
 
-        while (checked < max_samples) : (checked += 1) {
-            const idx = rand.intRangeLessThan(usize, 0, i_store.table.len);
-            const node = &i_store.table[idx];
+        if (i_store.occupied == 0) break;
+    }
 
-            if (node.state != .occupied) {
-                continue;
-            }
+    if (i_store.occupied == 0) {
+        manager.freeInactiveStoreVOLATILE();
+        return .disarm;
+    }
 
-            a_store.set(node.key, node.value, node.tag, .{ .ttl = node.ttl });
+    const threshold = max_samples / 4;
+    if (migrated > threshold) {
+        c.op.timer.timer.reset(loop, c, 0, m.Manager, manager) catch {
+            return .rearm;
+        };
 
-            node.state = .deleted;
-            i_store.occupied -= 1;
-            migrated += 1;
-
-            if (i_store.occupied == 0) break;
-        }
-
-        if (i_store.occupied == 0) {
-            manager.freeInactiveStoreVOLATILE();
-            return .disarm;
-        }
-
-        const threshold = max_samples / 4;
-        if (migrated > threshold) {
-            c.op.timer.timer.reset(loop, c, 0, m.Manager, manager) catch {
-                return .rearm;
-            };
-
-            return .disarm;
-        }
+        return .disarm;
     }
 
     return .rearm;
@@ -87,7 +93,12 @@ fn migrationLoop(manager: m.Manager) !void {
     try loop.run(.until_done);
 }
 
-fn spawn(manager: m.Manager) !void {
-    const migrator_trhead = try std.Thread.spawn(.{}, migrationLoop, .{manager});
+fn spawn(manager: m.Manager, io: std.Io) !void {
+    const ctx: MigratorContext = .{
+        .io = io,
+        .manager = manager,
+        .prefer_linear_scan = false,
+    };
+    const migrator_trhead = try std.Thread.spawn(.{}, migrationLoop, .{ctx});
     defer migrator_trhead.join();
 }
