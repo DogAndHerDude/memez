@@ -41,6 +41,10 @@ const SetOptions = struct {
     nx: bool = false, // only set if not exists
     xx: bool = false, // only set if exists
     get: bool = false, // return old value
+    // Override the computed `now + ttl` expiry with an absolute timestamp.
+    // Used by migration paths to preserve the source node's original expiry
+    // without a post-set write race against probe expiry sweeps.
+    expires_at: ?u64 = null,
 };
 
 pub const Store = struct {
@@ -76,6 +80,9 @@ pub const Store = struct {
     }
 
     pub fn get(self: *Store, key: []const u8) StoreError!*StoreNode {
+        self.mu.lock(self.io);
+        defer self.mu.unlock(self.io);
+
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
         const now: u64 = @intCast(std.Io.Clock.now(.real, self.io));
@@ -88,7 +95,7 @@ pub const Store = struct {
 
         if (std.mem.eql(u8, key, node.key)) {
             if (node.expires <= now) {
-                self.remove(node.key);
+                self.removeUnsafe(node.key) catch {};
 
                 return StoreError.KeyNotFound;
             }
@@ -111,7 +118,7 @@ pub const Store = struct {
 
             if (std.mem.eql(u8, key, n_node.key)) {
                 if (node.expires <= now) {
-                    self.remove(node.key);
+                    self.removeUnsafe(node.key) catch {};
 
                     return StoreError.KeyNotFound;
                 }
@@ -126,15 +133,18 @@ pub const Store = struct {
     }
 
     pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, opts: SetOptions) StoreError!*StoreNode {
-        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io));
-        const expires_at = now + opts.ttl;
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+
+        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io).toNanoseconds());
+        const expires_value = opts.expires_at orelse now + opts.ttl;
         var new_node = StoreNode{
             .state = .occupied,
             .key = key,
             .value = value,
             .tag = tag,
             .ttl = opts.ttl,
-            .expires = expires_at,
+            .expires = expires_value,
             .psl = 0,
         };
 
@@ -144,7 +154,7 @@ pub const Store = struct {
         while (true) {
             const current_node = &self.table[idx];
 
-            if (opts.nx and current_node.state == .empty or current_node.state == .deleted) {
+            if ((opts.nx and current_node.state == .empty) or current_node.state == .deleted) {
                 self.table[idx] = new_node;
                 self.occupied += 1;
 
@@ -153,7 +163,7 @@ pub const Store = struct {
                 return &self.table[idx];
             }
 
-            if (opts.xx and current_node.state == .occupied and std.mem.eql(new_node.key, current_node.key)) {
+            if (opts.xx and current_node.state == .occupied and std.mem.eql(u8, new_node.key, current_node.key)) {
                 self.table[idx] = new_node;
 
                 return &self.table[idx];
@@ -176,6 +186,14 @@ pub const Store = struct {
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        try self.removeUnsafe(key);
+    }
+
+    // Caller must hold self.mu. Use from within other Store methods that
+    // already lock the table (e.g. get() removing an expired entry).
+    pub fn removeUnsafe(self: *Store, key: []const u8) !void {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const m_store = @import("store.zig");
 const probe = @import("probe.zig");
+const migrator = @import("migrator.zig");
 
 const ManagerError = error{ FailedToInitialize, NoActiveStore, FailedRehashNoEmptySlot };
 
@@ -17,10 +18,14 @@ pub const Manager = struct {
     const UPSIZE_FACTOR: usize = 2;
     const DOWNSIZE_FACTOR: usize = 2;
 
-    active_store: ?m_store.Store = null,
-    inactive_store: ?m_store.Store = null,
+    // Stores are heap-boxed so their addresses (and their internal mutexes) stay
+    // stable across rehash. Manager only owns the pointers; the Store structs
+    // themselves never move once allocated.
+    active_store: ?*m_store.Store = null,
+    inactive_store: ?*m_store.Store = null,
 
-    active_store_ptr: ?*m_store.Store = null,
+    probe_worker: ?probe.Probe = null,
+    migrator_worker: ?migrator.Migrator = null,
 
     gpa: std.mem.Allocator,
 
@@ -31,77 +36,70 @@ pub const Manager = struct {
         var manager = Manager{
             .io = io,
             .gpa = allocator,
-            .active_store = m_store.Store.init(allocator, io, size) catch |err| {
-                std.log.err("MANAGER: failed to init active store: {}", .{err});
-                return ManagerError.FailedToInitialize;
-            },
         };
 
-        if (manager.active_store) |*store| {
-            // TODO: Update PTR on rehash
-            manager.active_store_ptr = store;
+        const a_store = allocator.create(m_store.Store) catch |err| {
+            std.log.err("MANAGER: failed to allocate active store: {}", .{err});
+            return ManagerError.FailedToInitialize;
+        };
+        errdefer allocator.destroy(a_store);
 
-            probe.spawn(store, io) catch |err| {
-                std.log.err("MANAGER: failed to spawn probe: {}", .{err});
-                return ManagerError.FailedToInitialize;
-            };
+        a_store.* = m_store.Store.init(allocator, io, size) catch |err| {
+            std.log.err("MANAGER: failed to init active store: {}", .{err});
+            return ManagerError.FailedToInitialize;
+        };
+        errdefer a_store.deinit();
 
-            return manager;
-        }
+        manager.active_store = a_store;
 
-        return ManagerError.FailedToInitialize;
+        manager.probe_worker = probe.spawn(allocator, a_store, io) catch |err| {
+            std.log.err("MANAGER: failed to spawn probe: {}", .{err});
+            return ManagerError.FailedToInitialize;
+        };
+
+        return manager;
     }
 
     pub fn deinit(self: *Manager) void {
-        if (self.active_store) |*store| {
-            store.deinit();
-        }
+        // Stop workers before tearing down the stores they reference.
+        if (self.probe_worker) |*w| w.stop();
+        self.probe_worker = null;
 
-        if (self.inactive_store) |*store| {
-            store.deinit();
+        if (self.migrator_worker) |*w| w.stop();
+        self.migrator_worker = null;
+
+        if (self.active_store) |a_store| {
+            a_store.deinit();
+            self.gpa.destroy(a_store);
+        }
+        if (self.inactive_store) |i_store| {
+            i_store.deinit();
+            self.gpa.destroy(i_store);
         }
 
         self.active_store = null;
         self.inactive_store = null;
-        self.active_store_ptr = null;
     }
 
     pub fn get(self: *Manager, key: []const u8) !*m_store.StoreNode {
-        defer self.freeInactiveTableVOLATILE();
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
 
-        // TODO: errors;
-        const a_table = self.active_store orelse return;
-
-        a_table.mu.lock(a_table.io);
-        defer a_table.mu.unlock(a_table.io);
+        const a_table = self.active_store orelse return ManagerError.NoActiveStore;
 
         const node = a_table.get(key) catch |err| {
-            if (err == m_store.StoreError.KeyNotFound) {
-                const i_table = self.inactive_store orelse {
-                    return m_store.StoreError.KeyNotFound;
-                };
+            if (err != m_store.StoreError.KeyNotFound) return err;
 
-                i_table.mu.lock(i_table.io);
-                defer i_table.mu.unlock(i_table.io);
+            const i_table = self.inactive_store orelse return m_store.StoreError.KeyNotFound;
 
-                // Better call migrate within the store and handle data there
-                // This is just a POC for myself
-                const node = try i_table.get(key);
-                const n_node = self.migrateUnsafe(node) catch |m_err| {
-                    std.debug.print("MANAGER: migrate error: {}\n", .{m_err});
+            // Store.get locks the table's mutex internally; don't pre-lock here.
+            const i_node = try i_table.get(key);
+            const n_node = self.migrateUnsafe(i_table, i_node) catch |m_err| {
+                std.debug.print("MANAGER: migrate error: {}\n", .{m_err});
+                return m_store.StoreError.KeyNotFound;
+            };
 
-                    return m_store.StoreError.KeyNotFound;
-                };
-
-                n_node.ttl = node.ttl;
-                n_node.expires = node.expires;
-
-                m_store.resetNode(node);
-
-                if (i_table.occupied > 0) i_table.occupied -= 1;
-
-                return n_node;
-            }
+            return n_node;
         };
 
         return node;
@@ -111,46 +109,38 @@ pub const Manager = struct {
     // - add expiry set command
     // - all that kinds of fancy stuff
     // - will probably refer to redis commands for implementation
-    pub fn set(self: *Manager, key: []const u8, value: *anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !*m_store.StoreNode {
-        var store: ?m_store.Store = undefined;
+    pub fn set(self: *Manager, key: []const u8, value: *const anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !*m_store.StoreNode {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+
         const rehash_direction = try self.needsRehash();
+        try self.rehashUnsafe(rehash_direction);
 
-        try self.rehash(rehash_direction);
+        const store = self.active_store orelse return m_store.StoreError.TableNotInitialized;
+        const new_node = try store.set(key, value, tag, opts);
 
-        store = self.active_store orelse return m_store.StoreError.TableNotInitialized;
-
-        if (store) |a_store| {
-            a_store.mu.lock();
-            a_store.mu.unlock();
-
-            const new_node = try a_store.set(key, value, tag, opts);
-
-            self.probe.add(new_node);
-
-            return new_node;
-        }
-
-        // TODO: error
-        return;
+        return new_node;
     }
 
-    // TODO: Remove fn
+    // TODO: Probably return on remove or some shit like that as an option
+    pub fn remove(self: *Manager, key: []const u8) !void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        if (self.active_store) |store| try store.remove(key);
+    }
 
     pub fn migrateUnsafe(self: *Manager, i_table: *m_store.Store, node: *m_store.StoreNode) !*m_store.StoreNode {
-        const n_node = try self.set(node.key, node.value, node.tag, .{});
+        const a_store = self.active_store orelse return ManagerError.NoActiveStore;
 
-        // Since I do not save initial options, and expiry would be shifted from now + original ttl
-        // I just basically save all the relevant values to it
-        // Perhaps zig has a better approach for this
-        n_node.ttl = node.ttl;
-        n_node.expires = node.expires;
-
-        if (n_node.expires > 0) {
-            self.probe.swap(node, n_node);
-        }
+        // expires_at preserves the source node's absolute expiry instead of
+        // letting a_store.set extend it by `now + ttl`. The override is applied
+        // under a_store.mu, so the probe can't observe a transient bumped value.
+        const n_node = try a_store.set(node.key, node.value, node.tag, .{
+            .ttl = node.ttl,
+            .expires_at = node.expires,
+        });
 
         m_store.resetNode(node);
-
         if (i_table.occupied > 0) i_table.occupied -= 1;
 
         return n_node;
@@ -159,8 +149,8 @@ pub const Manager = struct {
     pub fn needsRehash(self: *Manager) ManagerError!RehashDirection {
         const a_store = self.active_store orelse return ManagerError.NoActiveStore;
 
-        const occupied: f16 = @floatCast(a_store.occupied);
-        const capacity: f16 = @floatCast(a_store.capacity);
+        const occupied: f16 = @floatFromInt(a_store.occupied);
+        const capacity: f16 = @floatFromInt(a_store.capacity);
         const load = occupied / capacity;
 
         if (load >= UPSIZE_THRESHOLD) return .up;
@@ -170,82 +160,76 @@ pub const Manager = struct {
     }
 
     pub fn rehash(self: *Manager, direction: RehashDirection) ManagerError!void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        try self.rehashUnsafe(direction);
+    }
+
+    // Caller must hold self.mu.
+    pub fn rehashUnsafe(self: *Manager, direction: RehashDirection) ManagerError!void {
         switch (direction) {
             .up => {
-                self.mu.lock(self.io);
-                defer self.mu.unlock(self.io);
+                const a_store = self.active_store orelse return ManagerError.NoActiveStore;
 
-                var n_store: ?m_store.Store = null;
+                // Need free inactive slot to swap into; otherwise the old store has nowhere to go.
+                if (self.inactive_store != null) return ManagerError.FailedRehashNoEmptySlot;
 
-                if (self.active_store) |a_store| {
-                    const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
-                    n_store = m_store.Store.init(self.gpa, self.io, n_size) catch |err| {
-                        std.log.err(err);
-                        return ManagerError.FailedToInitialize;
-                    };
-                } else {
-                    n_store.?.deinit();
-                    std.log.err("MANAGER: failed to rehash store .up, no active store available to rehash");
+                const n_size = a_store.table.len * @sizeOf(m_store.StoreNode) * UPSIZE_FACTOR;
+                const n_store = self.gpa.create(m_store.Store) catch |err| {
+                    std.log.err("MANAGER: rehash up allocate failed: {}", .{err});
                     return ManagerError.FailedToInitialize;
-                }
+                };
+                errdefer self.gpa.destroy(n_store);
+                n_store.* = m_store.Store.init(self.gpa, self.io, n_size) catch |err| {
+                    std.log.err("MANAGER: rehash up init failed: {}", .{err});
+                    return ManagerError.FailedToInitialize;
+                };
+                errdefer n_store.deinit();
 
-                if (n_store and self.inactive_store == null) |new_store| {
-                    self.inactive_store = self.active_store;
-                    self.active_store = new_store;
-                    self.active_store_ptr = &self.active_store;
-
-                    return;
-                }
-
-                if (n_store and self.inactive_store != null) {
-                    // Gotta force migrate otherwise we're screwed
-                    // Or just let it explode
-                    return ManagerError.FailedRehashNoEmptySlot;
-                }
-
-                // TODO: error logs
-                return ManagerError.FailedToInitialize;
+                self.inactive_store = self.active_store;
+                self.active_store = n_store;
+                return;
             },
             .down => {
                 // We do not have the free slot to scale down for now
-                if (self.inactive_store) {
-                    return;
-                }
-
-                self.mu.lock(self.io);
-                defer self.mu.unlock(self.io);
+                if (self.inactive_store != null) return;
 
                 const a_store = self.active_store orelse return ManagerError.NoActiveStore;
-                const n_store: ?m_store.Store = null;
 
                 // NOTE: DUUUMB, will never scale down because I overwrite the starting configuration min_size
                 // meaning min_capacity will always match capacity.
                 // Leaving this heap of shit here so I could refactor it
-                if (a_store.capacity > a_store.min_capacity) {
-                    const n_size = @sizeOf(a_store.table) / DOWNSIZE_FACTOR;
-                    n_store = m_store.Store.init(self.gpa, self.io, n_size);
-                }
+                if (a_store.capacity <= a_store.min_capacity) return;
 
-                if (n_store) |new_store| {
-                    self.inactive_store = self.active_store;
-                    self.active_store = new_store;
-                    self.active_store_ptr = &self.active_store;
+                const n_size = a_store.table.len * @sizeOf(m_store.StoreNode) / DOWNSIZE_FACTOR;
+                const n_store = self.gpa.create(m_store.Store) catch |err| {
+                    std.log.err("MANAGER: rehash down allocate failed: {}", .{err});
+                    return ManagerError.FailedToInitialize;
+                };
+                errdefer self.gpa.destroy(n_store);
+                n_store.* = m_store.Store.init(self.gpa, self.io, n_size) catch |err| {
+                    std.log.err("MANAGER: rehash down init failed: {}", .{err});
+                    return ManagerError.FailedToInitialize;
+                };
+                errdefer n_store.deinit();
 
-                    return;
-                }
-
-                return ManagerError.FailedToInitialize;
-            },
-            .none => {
+                self.inactive_store = self.active_store;
+                self.active_store = n_store;
                 return;
             },
+            .none => return,
         }
     }
 
-    fn freeInactiveTableVOLATILE(self: *Manager) void {
+    // Locks self.mu internally. Safe to call from a worker thread.
+    pub fn freeInactiveStoreVOLATILE(self: *Manager) void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+
         if (self.inactive_store) |i_store| {
             i_store.deinit();
-            i_store = null;
+            self.gpa.destroy(i_store);
+            self.inactive_store = null;
         }
     }
 };
