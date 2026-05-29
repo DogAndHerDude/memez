@@ -4,6 +4,7 @@ const hasher = @import("hasher.zig");
 pub const NO_EXPIRY: u64 = 0;
 
 pub const StoreError = error{
+    InitializationFailed,
     TableFull,
     TableNotInitialized,
     KeyNotFound,
@@ -35,11 +36,6 @@ pub const StoreNode = struct {
     state: NodeState = .empty,
 };
 
-const ActiveTable = enum {
-    primary,
-    secondary,
-};
-
 const SetOptions = struct {
     ttl: u64 = 0, // 0 = no expiry
     nx: bool = false, // only set if not exists
@@ -48,7 +44,7 @@ const SetOptions = struct {
 };
 
 pub const Store = struct {
-    min_capacity: usize,
+    min_capacity: usize, // starting capacity based on min_size
 
     table: []StoreNode,
     occupied: usize = 0,
@@ -62,14 +58,14 @@ pub const Store = struct {
 
     // TODO: change to min_size: usize to initialize an empty store, grow as needed
     // TODO: read from disk and initialize with the size of the data on disk
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) !Store {
-        const max_items = size / @sizeOf(StoreNode);
-        const buf = try allocator.alloc(StoreNode, max_items);
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, min_size: usize) !Store {
+        const max_init_items = min_size / @sizeOf(StoreNode);
+        const buf = try allocator.alloc(StoreNode, max_init_items);
 
         return Store{
-            .min_capacity = max_items,
+            .min_capacity = max_init_items,
             .table = buf,
-            .capacity = max_items,
+            .capacity = max_init_items,
             .io = io,
             .gpa = allocator,
         };
@@ -82,7 +78,7 @@ pub const Store = struct {
     pub fn get(self: *Store, key: []const u8) StoreError!*StoreNode {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
-        const now: u64 = @intCast(std.time.timestamp());
+        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io));
 
         const node = self.table[idx];
 
@@ -130,8 +126,7 @@ pub const Store = struct {
     }
 
     pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, opts: SetOptions) StoreError!*StoreNode {
-        const i_now = std.time.timestamp();
-        const now: u64 = @intCast(i_now);
+        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io));
         const expires_at = now + opts.ttl;
         var new_node = StoreNode{
             .state = .occupied,

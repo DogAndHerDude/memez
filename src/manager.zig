@@ -2,12 +2,7 @@ const std = @import("std");
 const m_store = @import("store.zig");
 const probe = @import("probe.zig");
 
-const ManagerError = error{FailedToInitialize};
-
-const ActiveStore = enum {
-    primary,
-    secondary,
-};
+const ManagerError = error{ FailedToInitialize, NoActiveStore, FailedRehashNoEmptySlot };
 
 const RehashDirection = enum {
     up,
@@ -161,23 +156,20 @@ pub const Manager = struct {
         return n_node;
     }
 
-    pub fn needsRehash(self: *Manager) !RehashDirection {
-        if (self.active_store) |a_store| {
-            const occupied: f16 = @floatCast(a_store.occupied);
-            const capacity: f16 = @floatCast(a_store.capacity);
-            const load = occupied / capacity;
+    pub fn needsRehash(self: *Manager) ManagerError!RehashDirection {
+        const a_store = self.active_store orelse return ManagerError.NoActiveStore;
 
-            if (load >= UPSIZE_THRESHOLD) return .up;
-            if (load <= DOWNSIZE_THRESHOLD and a_store.occupied > a_store.min_capacity) return .down;
+        const occupied: f16 = @floatCast(a_store.occupied);
+        const capacity: f16 = @floatCast(a_store.capacity);
+        const load = occupied / capacity;
 
-            return .none;
-        }
+        if (load >= UPSIZE_THRESHOLD) return .up;
+        if (load <= DOWNSIZE_THRESHOLD and a_store.occupied > a_store.min_capacity) return .down;
 
-        // TODO: errors
-        return;
+        return .none;
     }
 
-    pub fn rehash(self: *Manager, direction: RehashDirection) !void {
+    pub fn rehash(self: *Manager, direction: RehashDirection) ManagerError!void {
         switch (direction) {
             .up => {
                 self.mu.lock(self.io);
@@ -187,30 +179,62 @@ pub const Manager = struct {
 
                 if (self.active_store) |a_store| {
                     const n_size = @sizeOf(a_store.table) * UPSIZE_FACTOR;
-                    n_store = try m_store.Store.init(self.gpa, n_size);
+                    n_store = m_store.Store.init(self.gpa, self.io, n_size) catch |err| {
+                        std.log.err(err);
+                        return ManagerError.FailedToInitialize;
+                    };
                 } else {
                     n_store.?.deinit();
-
-                    // TODO: errors, we done goof'd
-                    return;
+                    std.log.err("MANAGER: failed to rehash store .up, no active store available to rehash");
+                    return ManagerError.FailedToInitialize;
                 }
 
                 if (n_store and self.inactive_store == null) |new_store| {
                     self.inactive_store = self.active_store;
                     self.active_store = new_store;
+                    self.active_store_ptr = &self.active_store;
 
                     return;
                 }
 
                 if (n_store and self.inactive_store != null) {
                     // Gotta force migrate otherwise we're screwed
+                    // Or just let it explode
+                    return ManagerError.FailedRehashNoEmptySlot;
                 }
 
-                // We done goof'd here too
-                return;
+                // TODO: error logs
+                return ManagerError.FailedToInitialize;
             },
             .down => {
-                return;
+                // We do not have the free slot to scale down for now
+                if (self.inactive_store) {
+                    return;
+                }
+
+                self.mu.lock(self.io);
+                defer self.mu.unlock(self.io);
+
+                const a_store = self.active_store orelse return ManagerError.NoActiveStore;
+                const n_store: ?m_store.Store = null;
+
+                // NOTE: DUUUMB, will never scale down because I overwrite the starting configuration min_size
+                // meaning min_capacity will always match capacity.
+                // Leaving this heap of shit here so I could refactor it
+                if (a_store.capacity > a_store.min_capacity) {
+                    const n_size = @sizeOf(a_store.table) / DOWNSIZE_FACTOR;
+                    n_store = m_store.Store.init(self.gpa, self.io, n_size);
+                }
+
+                if (n_store) |new_store| {
+                    self.inactive_store = self.active_store;
+                    self.active_store = new_store;
+                    self.active_store_ptr = &self.active_store;
+
+                    return;
+                }
+
+                return ManagerError.FailedToInitialize;
             },
             .none => {
                 return;
