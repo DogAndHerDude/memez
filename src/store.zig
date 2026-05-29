@@ -53,7 +53,6 @@ pub const Store = struct {
     table: []StoreNode,
     occupied: usize = 0,
     capacity: usize,
-    deleted: usize = 0,
 
     gpa: std.mem.Allocator,
 
@@ -149,7 +148,8 @@ pub const Store = struct {
         };
 
         const hash = try hasher.hashKey(key);
-        var idx = hash % self.table.len;
+        const start_idx = hash % self.table.len;
+        var idx = start_idx;
 
         while (true) {
             const current_node = &self.table[idx];
@@ -157,8 +157,6 @@ pub const Store = struct {
             if (opts.nx and (current_node.state == .empty or current_node.state == .deleted)) {
                 self.table[idx] = new_node;
                 self.occupied += 1;
-
-                if (current_node.state == .deleted and self.deleted > 0) self.deleted -= 1;
 
                 return &self.table[idx];
             }
@@ -179,10 +177,9 @@ pub const Store = struct {
             new_node.psl += 1;
             idx = (idx + 1) % self.table.len;
 
-            if (idx == 0) return StoreError.TableFull;
+            // Full wrap back to the original hash bucket means no free slot was found.
+            if (idx == start_idx) return StoreError.TableFull;
         }
-
-        // I'm sure something is not handled here potentially, but shouldn't happen really unless I loop forever more
     }
 
     pub fn remove(self: *Store, key: []const u8) !void {
@@ -195,40 +192,45 @@ pub const Store = struct {
     // already lock the table (e.g. get() removing an expired entry).
     pub fn removeUnsafe(self: *Store, key: []const u8) !void {
         const hash = try hasher.hashKey(key);
-        const idx = hash % self.table.len;
+        const start_idx = hash % self.table.len;
 
-        const node = &self.table[idx];
-
-        if (node.state != .occupied) {
-            return;
-        }
-
-        node.state = .deleted;
-        if (self.occupied > 0) self.occupied -= 1;
-        self.deleted += 1;
-
-        var n_i_psl = idx + 1;
-
-        while (n_i_psl < self.table.len) {
-            if (self.table[n_i_psl].psl > 0) {
-                const p_node = &self.table[n_i_psl];
-                var temp_node = p_node.*;
-                temp_node.psl -= 1;
-                self.table[n_i_psl - 1] = temp_node;
-
-                if (n_i_psl + 1 < self.table.len and self.table[n_i_psl + 1].psl == 0) {
-                    resetNode(p_node);
-                }
-
-                n_i_psl += 1;
-
-                continue;
+        // Probe for the matching key. Wraps around, skips tombstones, and
+        // bails on the robin-hood psl invariant: hitting an occupied entry
+        // whose psl is shorter than our probe distance means our key would
+        // have been swapped in at that slot on insert, so it's not here.
+        var probe_idx = start_idx;
+        var probe_psl: usize = 0;
+        while (probe_psl < self.table.len) : ({
+            probe_idx = (probe_idx + 1) % self.table.len;
+            probe_psl += 1;
+        }) {
+            const cur = &self.table[probe_idx];
+            if (cur.state == .empty) return;
+            if (cur.state == .occupied) {
+                if (std.mem.eql(u8, cur.key, key)) break;
+                if (cur.psl < probe_psl) return;
             }
+            // .deleted: tombstone — keep probing.
+        }
+        if (probe_psl >= self.table.len) return;
 
-            return;
+        // Back-shift deletion: walk the hole forward, sliding any displaced
+        // entry (occupied, psl > 0) into it and decrementing its psl. The
+        // trailing slot is then marked empty — no tombstone left behind.
+        var hole_idx = probe_idx;
+        while (true) {
+            const next_idx = (hole_idx + 1) % self.table.len;
+            const next = &self.table[next_idx];
+
+            if (next.state != .occupied or next.psl == 0) break;
+
+            self.table[hole_idx] = next.*;
+            self.table[hole_idx].psl -= 1;
+            hole_idx = next_idx;
         }
 
-        return;
+        resetNode(&self.table[hole_idx]);
+        if (self.occupied > 0) self.occupied -= 1;
     }
 };
 
