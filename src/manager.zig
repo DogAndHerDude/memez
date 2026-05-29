@@ -2,6 +2,8 @@ const std = @import("std");
 const m_store = @import("store.zig");
 const probe = @import("probe.zig");
 
+const ManagerError = error{FailedToInitialize};
+
 const ActiveStore = enum {
     primary,
     secondary,
@@ -30,24 +32,29 @@ pub const Manager = struct {
     io: std.Io,
     mu: std.Io.Mutex = .init,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) !Manager {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) ManagerError!Manager {
         var manager = Manager{
             .io = io,
             .gpa = allocator,
-            .active_store = try m_store.Store.init(allocator, io, size),
+            .active_store = m_store.Store.init(allocator, io, size) catch |err| {
+                std.log.err("MANAGER: failed to init active store: {}", .{err});
+                return ManagerError.FailedToInitialize;
+            },
         };
 
         if (manager.active_store) |*store| {
             // TODO: Update PTR on rehash
             manager.active_store_ptr = store;
 
-            try probe.spawn(store);
+            probe.spawn(store) catch |err| {
+                std.log.err("MANAGER: failed to spawn probe: {}", .{err});
+                return ManagerError.FailedToInitialize;
+            };
 
             return manager;
         }
 
-        // TODO: errors, cause we done goofed major!
-        return;
+        return ManagerError.FailedToInitialize;
     }
 
     pub fn deinit(self: *Manager) void {
