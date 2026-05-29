@@ -80,27 +80,27 @@ pub const Store = struct {
     }
 
     pub fn get(self: *Store, key: []const u8) StoreError!*StoreNode {
-        self.mu.lock(self.io);
+        self.mu.lockUncancelable(self.io);
         defer self.mu.unlock(self.io);
 
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
-        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io));
+        const now: u64 = @intCast(std.Io.Clock.now(.real, self.io).toNanoseconds());
 
-        const node = self.table[idx];
+        const node = &self.table[idx];
 
         if (node.state != .occupied) {
             return StoreError.KeyNotFound;
         }
 
         if (std.mem.eql(u8, key, node.key)) {
-            if (node.expires <= now) {
+            if (node.expires != NO_EXPIRY and node.expires <= now) {
                 self.removeUnsafe(node.key) catch {};
 
                 return StoreError.KeyNotFound;
             }
 
-            return &node;
+            return node;
         }
 
         var n_i_psl = idx + 1;
@@ -110,20 +110,20 @@ pub const Store = struct {
         }
 
         while (n_i_psl < self.table.len) {
-            const n_node = self.table[idx + 1];
+            const n_node = &self.table[n_i_psl];
 
             if (n_node.psl == 0) {
                 return StoreError.KeyNotFound;
             }
 
             if (std.mem.eql(u8, key, n_node.key)) {
-                if (node.expires <= now) {
-                    self.removeUnsafe(node.key) catch {};
+                if (n_node.expires != NO_EXPIRY and n_node.expires <= now) {
+                    self.removeUnsafe(n_node.key) catch {};
 
                     return StoreError.KeyNotFound;
                 }
 
-                return &n_node;
+                return n_node;
             }
 
             n_i_psl += 1;
@@ -154,7 +154,7 @@ pub const Store = struct {
         while (true) {
             const current_node = &self.table[idx];
 
-            if ((opts.nx and current_node.state == .empty) or current_node.state == .deleted) {
+            if (opts.nx and (current_node.state == .empty or current_node.state == .deleted)) {
                 self.table[idx] = new_node;
                 self.occupied += 1;
 
@@ -197,7 +197,7 @@ pub const Store = struct {
         const hash = try hasher.hashKey(key);
         const idx = hash % self.table.len;
 
-        var node = self.table[idx];
+        const node = &self.table[idx];
 
         if (node.state != .occupied) {
             return;
@@ -209,7 +209,7 @@ pub const Store = struct {
 
         var n_i_psl = idx + 1;
 
-        while (n_i_psl <= self.table.len) {
+        while (n_i_psl < self.table.len) {
             if (self.table[n_i_psl].psl > 0) {
                 const p_node = &self.table[n_i_psl];
                 var temp_node = p_node.*;
@@ -234,9 +234,9 @@ pub const Store = struct {
 
 pub fn resetNode(node: *StoreNode) void {
     node.key = "";
-    node.value = &null;
     node.psl = 0;
     node.expires = 0;
+    node.ttl = 0;
     node.state = .empty;
     node.tag = .none;
 }
