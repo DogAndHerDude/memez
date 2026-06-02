@@ -127,7 +127,7 @@ fn onTick(
                     const node = &i_store.table[ctx.linear_cursor];
                     if (node.state != .occupied) continue;
 
-                    _ = a_store.set(node.key, node.value, node.tag, .{
+                    _ = a_store.set(node.key, node.value, node.value_len, node.tag, .{
                         .ttl = node.ttl,
                         .expires_at = node.expires,
                     }) catch {
@@ -157,7 +157,7 @@ fn onTick(
 
                     if (node.state != .occupied) continue;
 
-                    _ = a_store.set(node.key, node.value, node.tag, .{
+                    _ = a_store.set(node.key, node.value, node.value_len, node.tag, .{
                         .ttl = node.ttl,
                         .expires_at = node.expires,
                     }) catch {

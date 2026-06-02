@@ -125,7 +125,7 @@ pub const Manager = struct {
     // - add expiry set command
     // - all that kinds of fancy stuff
     // - will probably refer to redis commands for implementation
-    pub fn set(self: *Manager, key: []const u8, value: *const anyopaque, tag: m_store.TypeTag, opts: m_store.SetOptions) !*m_store.StoreNode {
+    pub fn set(self: *Manager, key: []const u8, value: *const anyopaque, value_len: usize, tag: m_store.TypeTag, opts: m_store.SetOptions) !*m_store.StoreNode {
         self.mu.lockUncancelable(self.io);
         defer self.mu.unlock(self.io);
 
@@ -133,7 +133,7 @@ pub const Manager = struct {
         try self.rehashUnsafe(rehash_direction);
 
         const store = self.active_store orelse return m_store.StoreError.TableNotInitialized;
-        const new_node = try store.set(key, value, tag, opts);
+        const new_node = try store.set(key, value, value_len, tag, opts);
 
         return new_node;
     }
@@ -151,7 +151,7 @@ pub const Manager = struct {
         // expires_at preserves the source node's absolute expiry instead of
         // letting a_store.set extend it by `now + ttl`. The override is applied
         // under a_store.mu, so the probe can't observe a transient bumped value.
-        const n_node = try a_store.set(node.key, node.value, node.tag, .{
+        const n_node = try a_store.set(node.key, node.value, node.value_len, node.tag, .{
             .ttl = node.ttl,
             .expires_at = node.expires,
         });

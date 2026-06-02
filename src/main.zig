@@ -29,7 +29,7 @@ pub fn main(init: std.process.Init) !void {
     var c: xev.Completion = undefined;
     w.run(&loop, &c, 100, manager.Manager, &mngr, timerCallback);
 
-    var srv = try server.Server.init(gpa, &loop, cfg.value.host, cfg.value.port);
+    var srv = try server.Server.init(gpa, &loop, &mngr, cfg.value.host, cfg.value.port);
     srv.start();
 
     try loop.run(.until_done);

@@ -29,6 +29,9 @@ pub const NodeState = enum {
 pub const StoreNode = struct {
     key: []const u8,
     value: *const anyopaque,
+    // Number of bytes addressable through `value` for variable-sized payloads
+    // (e.g. `.string`). Unused (0) for fixed-size tags like `.integer`.
+    value_len: usize = 0,
     ttl: u64 = 0,
     expires: u64 = 0,
     psl: u64 = 0,
@@ -36,7 +39,7 @@ pub const StoreNode = struct {
     state: NodeState = .empty,
 };
 
-const SetOptions = struct {
+pub const SetOptions = struct {
     ttl: u64 = 0, // 0 = no expiry
     nx: bool = false, // only set if not exists
     xx: bool = false, // only set if exists
@@ -64,6 +67,10 @@ pub const Store = struct {
     pub fn init(allocator: std.mem.Allocator, io: std.Io, min_size: usize) !Store {
         const max_init_items = min_size / @sizeOf(StoreNode);
         const buf = try allocator.alloc(StoreNode, max_init_items);
+        // Zero the buffer so every slot starts with state == .empty (the
+        // zero-valued enum tag) and psl == 0. Without this the robin-hood
+        // probe in set() reads uninitialized memory.
+        @memset(std.mem.sliceAsBytes(buf), 0);
 
         return Store{
             .min_capacity = max_init_items,
@@ -131,16 +138,17 @@ pub const Store = struct {
         return StoreError.KeyNotFound;
     }
 
-    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, tag: TypeTag, opts: SetOptions) StoreError!*StoreNode {
+    pub fn set(self: *Store, key: []const u8, value: *const anyopaque, value_len: usize, tag: TypeTag, opts: SetOptions) StoreError!*StoreNode {
         self.mu.lockUncancelable(self.io);
         defer self.mu.unlock(self.io);
 
         const now: u64 = @intCast(std.Io.Clock.now(.real, self.io).toNanoseconds());
-        const expires_value = opts.expires_at orelse now + opts.ttl;
+        const expires_value = opts.expires_at orelse if (opts.ttl == 0) NO_EXPIRY else now + opts.ttl;
         var new_node = StoreNode{
             .state = .occupied,
             .key = key,
             .value = value,
+            .value_len = value_len,
             .tag = tag,
             .ttl = opts.ttl,
             .expires = expires_value,
@@ -154,20 +162,25 @@ pub const Store = struct {
         while (true) {
             const current_node = &self.table[idx];
 
-            if (opts.nx and (current_node.state == .empty or current_node.state == .deleted)) {
+            // Insertion target: a slot that holds no live entry.
+            if (current_node.state != .occupied) {
+                if (opts.xx) return StoreError.KeyNotFound;
                 self.table[idx] = new_node;
                 self.occupied += 1;
-
                 return &self.table[idx];
             }
 
-            if (opts.xx and current_node.state == .occupied and std.mem.eql(u8, new_node.key, current_node.key)) {
+            // Existing live entry with the same key — replace in place.
+            if (std.mem.eql(u8, current_node.key, new_node.key)) {
+                if (opts.nx) return &self.table[idx];
+                const preserved_psl = current_node.psl;
                 self.table[idx] = new_node;
-
+                self.table[idx].psl = preserved_psl;
                 return &self.table[idx];
             }
 
-            // Shift them around, shake 'em up
+            // Robin-hood: if the new entry has probed further than the
+            // resident, swap and continue probing with the displaced entry.
             if (new_node.psl > current_node.psl) {
                 const temp_node = current_node.*;
                 current_node.* = new_node;
@@ -241,4 +254,5 @@ pub fn resetNode(node: *StoreNode) void {
     node.ttl = 0;
     node.state = .empty;
     node.tag = .none;
+    node.value_len = 0;
 }
