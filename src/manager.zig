@@ -29,13 +29,22 @@ pub const Manager = struct {
 
     gpa: std.mem.Allocator,
 
+    // Upper bound on the byte size of a single store's table. 0 = unlimited.
+    max_size: usize = 0,
+
     io: std.Io,
     mu: std.Io.Mutex = .init,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, min_size: usize) ManagerError!Manager {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, min_size: usize, max_size: usize) ManagerError!Manager {
+        if (max_size != 0 and max_size < min_size) {
+            std.log.err("MANAGER: max_size ({d}) < min_size ({d})", .{ max_size, min_size });
+            return ManagerError.FailedToInitialize;
+        }
+
         var manager = Manager{
             .io = io,
             .gpa = allocator,
+            .max_size = max_size,
         };
 
         const a_store = allocator.create(m_store.Store) catch |err| {
@@ -191,6 +200,18 @@ pub const Manager = struct {
                 if (self.inactive_store != null) return ManagerError.FailedRehashNoEmptySlot;
 
                 const n_size = a_store.table.len * @sizeOf(m_store.StoreNode) * UPSIZE_FACTOR;
+
+                // Cap growth at max_size if configured. The set that triggered
+                // this rehash still completes on the existing table; sets stop
+                // succeeding only once the un-grown table genuinely fills up.
+                if (self.max_size != 0 and n_size > self.max_size) {
+                    std.log.warn(
+                        "MANAGER: upsize to {d} bytes would exceed max_size {d}; staying at current capacity",
+                        .{ n_size, self.max_size },
+                    );
+                    return;
+                }
+
                 const n_store = self.gpa.create(m_store.Store) catch |err| {
                     std.log.err("MANAGER: rehash up allocate failed: {}", .{err});
                     return ManagerError.FailedToInitialize;

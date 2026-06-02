@@ -9,10 +9,12 @@ pub fn main(init: std.process.Init) !void {
 
     var cfg = config.load(gpa, init.io, "config.toml");
     defer cfg.deinit();
+    try config.validate(cfg.value);
 
     const min_size_bytes = cfg.value.min_size_mb * 1024 * 1024;
+    const max_size_bytes = cfg.value.max_size_mb * 1024 * 1024;
 
-    var mngr = try manager.Manager.init(gpa, init.io, min_size_bytes);
+    var mngr = try manager.Manager.init(gpa, init.io, min_size_bytes, max_size_bytes);
     defer mngr.deinit();
     try mngr.start();
 

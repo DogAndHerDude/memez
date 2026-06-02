@@ -1,10 +1,4 @@
-# memez server configuration.
-# Any field omitted falls back to the built-in default shown below.
-
-# Listen address.
 host = "127.0.0.1"
 port = 5882
-
-# Minimum size of the initial hash table, in megabytes. The table will
-# grow above this on demand and will not shrink below it.
-min_size_mb = 512
+min_size_mb = 4
+max_size_mb = 12
