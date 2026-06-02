@@ -32,7 +32,7 @@ pub const Manager = struct {
     io: std.Io,
     mu: std.Io.Mutex = .init,
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, size: usize) ManagerError!Manager {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, min_size: usize) ManagerError!Manager {
         var manager = Manager{
             .io = io,
             .gpa = allocator,
@@ -44,7 +44,7 @@ pub const Manager = struct {
         };
         errdefer allocator.destroy(a_store);
 
-        a_store.* = m_store.Store.init(allocator, io, size) catch |err| {
+        a_store.* = m_store.Store.init(allocator, io, min_size) catch |err| {
             std.log.err("MANAGER: failed to init active store: {}", .{err});
             return ManagerError.FailedToInitialize;
         };

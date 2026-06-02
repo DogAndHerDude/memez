@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const xev = b.dependency("xev", .{ .target = target, .optimize = optimize });
+    const toml = b.dependency("toml", .{ .target = target, .optimize = optimize });
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -82,6 +83,7 @@ pub fn build(b: *std.Build) void {
                 // importing modules from different packages).
                 .{ .name = "memez", .module = mod },
                 .{ .name = "xev", .module = xev.module("xev") },
+                .{ .name = "toml", .module = toml.module("toml") },
             },
         }),
     });

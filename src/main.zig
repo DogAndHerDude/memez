@@ -2,13 +2,17 @@ const std = @import("std");
 const xev = @import("xev");
 const manager = @import("manager.zig");
 const server = @import("server.zig");
+const config = @import("config.zig");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
-    const user_size_mb: usize = 512;
-    const size_bytes = user_size_mb * 1024 * 1024;
 
-    var mngr = try manager.Manager.init(gpa, init.io, size_bytes);
+    var cfg = config.load(gpa, init.io, "config.toml");
+    defer cfg.deinit();
+
+    const min_size_bytes = cfg.value.min_size_mb * 1024 * 1024;
+
+    var mngr = try manager.Manager.init(gpa, init.io, min_size_bytes);
     defer mngr.deinit();
 
     var tpool = xev.ThreadPool.init(.{});
@@ -24,7 +28,7 @@ pub fn main(init: std.process.Init) !void {
     var c: xev.Completion = undefined;
     w.run(&loop, &c, 100, manager.Manager, &mngr, timerCallback);
 
-    var srv = try server.Server.init(gpa, &loop, "127.0.0.1", 5882);
+    var srv = try server.Server.init(gpa, &loop, cfg.value.host, cfg.value.port);
     srv.start();
 
     try loop.run(.until_done);
