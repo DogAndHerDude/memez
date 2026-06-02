@@ -52,12 +52,28 @@ pub const Manager = struct {
 
         manager.active_store = a_store;
 
-        manager.probe_worker = probe.spawn(allocator, a_store, io) catch |err| {
+        return manager;
+    }
+
+    // Spawns worker threads. Must be called after Manager.init returns, so
+    // workers capture the Manager's final address rather than the temporary
+    // returned from init.
+    pub fn start(self: *Manager) ManagerError!void {
+        const a_store = self.active_store orelse return ManagerError.NoActiveStore;
+
+        self.probe_worker = probe.spawn(self.gpa, a_store, self.io) catch |err| {
             std.log.err("MANAGER: failed to spawn probe: {}", .{err});
             return ManagerError.FailedToInitialize;
         };
+        errdefer if (self.probe_worker) |*w| {
+            w.stop();
+            self.probe_worker = null;
+        };
 
-        return manager;
+        self.migrator_worker = migrator.spawn(self.gpa, self, self.io) catch |err| {
+            std.log.err("MANAGER: failed to spawn migrator: {}", .{err});
+            return ManagerError.FailedToInitialize;
+        };
     }
 
     pub fn deinit(self: *Manager) void {

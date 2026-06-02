@@ -14,6 +14,7 @@ pub fn main(init: std.process.Init) !void {
 
     var mngr = try manager.Manager.init(gpa, init.io, min_size_bytes);
     defer mngr.deinit();
+    try mngr.start();
 
     var tpool = xev.ThreadPool.init(.{});
     defer tpool.deinit();
