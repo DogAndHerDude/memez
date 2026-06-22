@@ -162,7 +162,7 @@ pub const Manager = struct {
         // under a_store.mu, so the probe can't observe a transient bumped value.
         const n_node = try a_store.set(node.key, node.value, node.value_len, node.tag, .{
             .ttl = node.ttl,
-            .expires_at = node.expires,
+            .expires_at = node.expires_at,
         });
 
         m_store.resetNode(node);

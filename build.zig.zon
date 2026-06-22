@@ -37,8 +37,8 @@
             .hash = "libxev-0.0.0-86vtcwIRFACVrx54GaHsMFFlyC4dTi0tcVh10V7btRUc",
         },
         .toml = .{
-            .url = "https://github.com/sam701/zig-toml/archive/refs/heads/main.tar.gz",
-            .hash = "toml-0.3.0-bV14BVqIAQANb68hDuVPZ72hrcIhT-fv_fcIbetQIAyg",
+            .url = "git+https://github.com/sam701/zig-toml#00c5715edc45e0019cc0543ee699ee40382e5247",
+            .hash = "toml-0.3.0-bV14BRmKAQAWR0FT0KUKFwVJTImaFhWjSe6HfSMtNZOH",
         },
     },
     .paths = .{

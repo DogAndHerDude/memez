@@ -8,6 +8,7 @@ pub const Command = union(enum) {
         key: []const u8,
         value: []const u8,
         ex_seconds: ?u64 = null,
+        px_milliseconds: ?u64 = null,
     };
 
     pub const Get = struct {
@@ -40,7 +41,7 @@ pub fn parse(buf: []const u8) ParseError!Parsed {
     pos = cmd.next;
 
     if (asciiEqlIgnoreCase(cmd.bytes, "SET")) {
-        if (count != 3 and count != 5) return ParseError.Protocol;
+        if (count < 3) return ParseError.Protocol;
 
         const key = try readBulk(buf, pos);
         pos = key.next;
@@ -48,17 +49,27 @@ pub fn parse(buf: []const u8) ParseError!Parsed {
         pos = value.next;
 
         var ex: ?u64 = null;
-        if (count == 5) {
+        var px: ?u64 = null;
+
+        while (pos < buf.len) {
             const opt = try readBulk(buf, pos);
             pos = opt.next;
-            if (!asciiEqlIgnoreCase(opt.bytes, "EX")) return ParseError.Protocol;
-            const ex_bulk = try readBulk(buf, pos);
-            pos = ex_bulk.next;
-            ex = std.fmt.parseInt(u64, ex_bulk.bytes, 10) catch return ParseError.Protocol;
+
+            if (asciiEqlIgnoreCase(opt.bytes, "EX")) {
+                const val = try readBulk(buf, pos);
+                pos = val.next;
+                ex = std.fmt.parseInt(u64, val.bytes, 10) catch return ParseError.Protocol;
+            } else if (asciiEqlIgnoreCase(opt.bytes, "PX")) {
+                const val = try readBulk(buf, pos);
+                pos = val.next;
+                px = std.fmt.parseInt(u64, val.bytes, 10) catch return ParseError.Protocol;
+            } else {
+                return ParseError.Protocol;
+            }
         }
 
         return .{
-            .command = .{ .set = .{ .key = key.bytes, .value = value.bytes, .ex_seconds = ex } },
+            .command = .{ .set = .{ .key = key.bytes, .value = value.bytes, .ex_seconds = ex, .px_milliseconds = px } },
             .consumed = pos,
         };
     }

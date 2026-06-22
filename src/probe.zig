@@ -59,7 +59,7 @@ fn onTick(
         const node = &store.table[idx];
 
         if (node.state == .occupied) {
-            if (node.expires > now) {
+            if (node.expires_at > now) {
                 continue;
             }
 

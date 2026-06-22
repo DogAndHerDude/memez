@@ -195,8 +195,13 @@ const Connection = struct {
                 errdefer self.gpa.free(key);
                 const value = try self.gpa.dupe(u8, s.value);
                 errdefer self.gpa.free(value);
+                var ttl_ns: u64 = 0;
 
-                const ttl_ns: u64 = if (s.ex_seconds) |sec| sec * std.time.ns_per_s else 0;
+                if (s.ex_seconds) |sec| {
+                    ttl_ns = sec * std.time.ns_per_s;
+                } else if (s.px_milliseconds) |ms| {
+                    ttl_ns = ms * std.time.ns_per_ms;
+                }
                 _ = try self.mngr.set(key, value.ptr, value.len, m_store.TypeTag.string, .{ .ttl = ttl_ns });
 
                 self.queueSimple("OK");

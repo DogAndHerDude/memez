@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const hasher = @import("hasher.zig");
 
 pub const NO_EXPIRY: u64 = 0;
@@ -33,14 +34,14 @@ pub const StoreNode = struct {
     // (e.g. `.string`). Unused (0) for fixed-size tags like `.integer`.
     value_len: usize = 0,
     ttl: u64 = 0,
-    expires: u64 = 0,
+    expires_at: u64 = 0,
     psl: u64 = 0,
     tag: TypeTag = .none,
     state: NodeState = .empty,
 };
 
 pub const SetOptions = struct {
-    ttl: u64 = 0, // 0 = no expiry
+    ttl: u64 = 0, // 0 = no expiry, ms
     nx: bool = false, // only set if not exists
     xx: bool = false, // only set if exists
     get: bool = false, // return old value
@@ -100,7 +101,8 @@ pub const Store = struct {
         }
 
         if (std.mem.eql(u8, key, node.key)) {
-            if (node.expires != NO_EXPIRY and node.expires <= now) {
+            std.log.debug("GET now: {d} expires_at: {d}", .{ now, node.expires_at });
+            if (node.expires_at != NO_EXPIRY and node.expires_at <= now) {
                 self.removeUnsafe(node.key) catch {};
 
                 return StoreError.KeyNotFound;
@@ -123,7 +125,7 @@ pub const Store = struct {
             }
 
             if (std.mem.eql(u8, key, n_node.key)) {
-                if (n_node.expires != NO_EXPIRY and n_node.expires <= now) {
+                if (n_node.expires_at != NO_EXPIRY and n_node.expires_at <= now) {
                     self.removeUnsafe(n_node.key) catch {};
 
                     return StoreError.KeyNotFound;
@@ -143,7 +145,8 @@ pub const Store = struct {
         defer self.mu.unlock(self.io);
 
         const now: u64 = @intCast(std.Io.Clock.now(.real, self.io).toNanoseconds());
-        const expires_value = opts.expires_at orelse if (opts.ttl == 0) NO_EXPIRY else now + opts.ttl;
+        const expires_at = opts.expires_at orelse if (opts.ttl == 0) NO_EXPIRY else now + opts.ttl;
+        std.log.debug("SET: expires_at: {d}, now: {d}, ttl_ns: {d}", .{ expires_at, now, opts.ttl });
         var new_node = StoreNode{
             .state = .occupied,
             .key = key,
@@ -151,7 +154,7 @@ pub const Store = struct {
             .value_len = value_len,
             .tag = tag,
             .ttl = opts.ttl,
-            .expires = expires_value,
+            .expires_at = expires_at,
             .psl = 0,
         };
 
@@ -250,9 +253,30 @@ pub const Store = struct {
 pub fn resetNode(node: *StoreNode) void {
     node.key = "";
     node.psl = 0;
-    node.expires = 0;
+    node.expires_at = 0;
     node.ttl = 0;
     node.state = .empty;
     node.tag = .none;
     node.value_len = 0;
+}
+
+test "expired node returns as KeyNotFound" {
+    const size = 2 * 1024;
+    var store = try Store.init(testing.allocator, testing.io, size);
+    defer store.deinit();
+    const key: []const u8 = "foo";
+    const val: []const u8 = "bar";
+    const ttl_ms: u64 = std.time.ms_per_s;
+
+    _ = try store.set(key, val.ptr, val.len, .string, .{
+        .ttl = ttl_ms,
+    });
+
+    const node = try store.get(key);
+    const res_bytes_ptr: [*]const u8 = @ptrCast(node.value);
+    const val_bytes = res_bytes_ptr[0..node.value_len];
+    try std.testing.expectEqual(key, node.key);
+    try std.testing.expectEqual(val, val_bytes);
+    try testing.io.sleep(.{ .nanoseconds = std.time.ns_per_s }, .real);
+    try std.testing.expectError(StoreError.KeyNotFound, store.get(key));
 }

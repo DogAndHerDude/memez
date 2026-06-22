@@ -129,7 +129,7 @@ fn onTick(
 
                     _ = a_store.set(node.key, node.value, node.value_len, node.tag, .{
                         .ttl = node.ttl,
-                        .expires_at = node.expires,
+                        .expires_at = node.expires_at,
                     }) catch {
                         // Don't advance the cursor on failure — retry this slot next tick.
                         return .rearm;
@@ -159,7 +159,7 @@ fn onTick(
 
                     _ = a_store.set(node.key, node.value, node.value_len, node.tag, .{
                         .ttl = node.ttl,
-                        .expires_at = node.expires,
+                        .expires_at = node.expires_at,
                     }) catch {
                         return .rearm;
                     };
